@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="问题手册 —— 把处理过的问题、回复话术和现场照片存成可搜索的经验库。">
+<title>问题手册 · 处置经验库</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6bff'/%3E%3Cpath d='M20 18h24a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H20a3 3 0 0 1-3-3V21a3 3 0 0 1 3-3z' fill='none' stroke='%23fff' stroke-width='3.5'/%3E%3Cpath d='M25 28h14M25 36h9' stroke='%23fff' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<!-- 图标库 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5V5.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 2.8v2.4M12 18.8v2.4M4.5 4.5l1.7 1.7M17.8 17.8l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.5 19.5l1.7-1.7M17.8 6.2l1.7-1.7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7M6.5 7l.8 12.2a1.8 1.8 0 0 0 1.8 1.8h5.8a1.8 1.8 0 0 0 1.8-1.8L17.5 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M15 6.2V5.2A2.2 2.2 0 0 0 12.8 3H6.2A2.2 2.2 0 0 0 4 5.2v6.6A2.2 2.2 0 0 0 6.2 14h1" fill="none" stroke="currentColor" stroke-width="1.9"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-star-fill" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.6z" fill="currentColor"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.8l4.6 4.6L19.5 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="9" cy="10" r="1.8" fill="currentColor"/><path d="M4.5 17.5l5-4.6 4 3.4 3-2.6 3.5 3.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.8" y="5.5" width="16.4" height="15" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M8 3.5v4M16 3.5v4M3.8 10.5h16.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M11.2 3.8H19a1.2 1.2 0 0 1 1.2 1.2v7.8a2 2 0 0 1-.6 1.4l-6 6a2 2 0 0 1-2.8 0l-6-6a2 2 0 0 1 0-2.8l6-6a2 2 0 0 1 1.4-.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4.5-4.5M12 16l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3.5 5.5h17l-6.5 7.6V20l-4-2.2v-4.7L3.5 5.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 8v5.5M12 17.2v.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M10.3 4.3 2.8 17.4A1.9 1.9 0 0 0 4.5 20.3h15a1.9 1.9 0 0 0 1.7-2.9L13.7 4.3a1.9 1.9 0 0 0-3.4 0z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 1 0-5.7-5.7L11.7 6.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 1 0 5.7 5.7l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="app" id="app">
+
+  <!-- ============ 侧边栏 ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" width="19" height="19"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5V5.5z" fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z" fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round"/><path d="M8 8h7M8 11.5h5" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </div>
+      <div class="brand-text">
+        <strong>问题手册</strong>
+        <span>处置经验库</span>
+      </div>
+      <button class="icon-btn only-mobile" id="btnCloseSidebar" title="收起菜单" aria-label="收起菜单">
+        <svg width="18" height="18"><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+    <button class="btn btn-primary btn-block btn-new" id="btnNew">
+      <svg width="17" height="17"><use href="#i-plus"/></svg>
+      <span>登记新问题</span>
+      <kbd>Alt N</kbd>
+    </button>
+
+    <nav class="nav">
+      <a class="nav-item active" data-view="library" href="javascript:void(0)">
+        <svg width="18" height="18"><use href="#i-book"/></svg><span>问题库</span>
+        <em class="nav-badge" id="navCount">0</em>
+      </a>
+      <a class="nav-item" data-view="stats" href="javascript:void(0)">
+        <svg width="18" height="18"><use href="#i-chart"/></svg><span>数据概览</span>
+      </a>
+      <a class="nav-item" data-view="import" href="javascript:void(0)">
+        <svg width="18" height="18"><use href="#i-upload"/></svg><span>导入表格</span>
+      </a>
+      <a class="nav-item" data-view="settings" href="javascript:void(0)">
+        <svg width="18" height="18"><use href="#i-settings"/></svg><span>设置与备份</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="storage">
+        <div class="storage-head">
+          <svg width="14" height="14"><use href="#i-database"/></svg>
+          <span>本地存储</span>
+          <b id="storageText">—</b>
+        </div>
+        <div class="storage-bar"><i id="storageBar" style="width:0%"></i></div>
+      </div>
+      <div class="foot-line">
+        <button class="link-btn" id="btnTheme">
+          <svg width="14" height="14"><use href="#i-moon"/></svg><span id="themeText">深色模式</span>
+        </button>
+        <span class="ver">v1.0</span>
+      </div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ============ 主区域 ============ -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="btnOpenSidebar" title="菜单" aria-label="菜单">
+        <svg width="20" height="20"><use href="#i-menu"/></svg>
+      </button>
+      <div class="search-wrap" id="searchWrap">
+        <svg class="search-icon" width="17" height="17"><use href="#i-search"/></svg>
+        <input type="search" id="searchInput" placeholder="搜索问题、解决方法、客户、标签…" autocomplete="off" spellcheck="false">
+        <button class="search-clear" id="searchClear" title="清空" aria-label="清空">×</button>
+        <kbd class="search-kbd">Ctrl K</kbd>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btnExportTop" title="导出当前筛选结果">
+          <svg width="16" height="16"><use href="#i-download"/></svg><span class="hide-sm">导出</span>
+        </button>
+        <button class="btn btn-primary" id="btnNewTop">
+          <svg width="16" height="16"><use href="#i-plus"/></svg><span>登记新问题</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="workspace">
+
+      <!-- ---------- 问题库 ---------- -->
+      <section class="view active" id="view-library">
+        <div class="view-head">
+          <div>
+            <h1 id="libTitle">问题库</h1>
+            <p class="sub" id="libSub">全部记录</p>
+          </div>
+        </div>
+
+        <div class="filterbar" id="filterbar">
+          <div class="chips" id="filterCats">
+            <button class="chip active" data-cat="">全部</button>
+          </div>
+          <div class="filter-right">
+            <select class="select select-sm" id="filterStatus" title="按状态筛选">
+              <option value="">全部状态</option>
+              <option value="已解决">已解决</option>
+              <option value="跟进中">跟进中</option>
+              <option value="未解决">未解决</option>
+            </select>
+            <select class="select select-sm" id="sortBy" title="排序方式">
+              <option value="updated">最近更新</option>
+              <option value="occurred">按发生日期</option>
+              <option value="used">最常使用</option>
+              <option value="title">按标题</option>
+            </select>
+            <button class="chip chip-toggle" id="filterStar" title="只看重点">
+              <svg width="13" height="13"><use href="#i-star"/></svg>重点
+            </button>
+          </div>
+        </div>
+
+        <div class="list-toolbar" id="listToolbar" hidden>
+          <span class="result-count" id="resultCount"></span>
+          <button class="link-btn" id="btnResetFilter">清除筛选</button>
+        </div>
+
+        <div class="record-list" id="recordList"></div>
+
+        <div class="empty" id="emptyLibrary">
+          <div class="empty-art">
+            <svg viewBox="0 0 120 120" width="120" height="120">
+              <rect x="18" y="26" width="84" height="70" rx="10" fill="var(--primary-soft)" stroke="var(--primary)" stroke-opacity=".28" stroke-width="2"/>
+              <path d="M32 46h30M32 58h44M32 70h22" stroke="var(--primary)" stroke-opacity=".45" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="84" cy="76" r="15" fill="var(--surface)" stroke="var(--primary)" stroke-opacity=".45" stroke-width="2.5"/>
+              <path d="M94 86l8 8" stroke="var(--primary)" stroke-opacity=".45" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>还没有登记过问题</h3>
+          <p>把处理过的问题和回复方法记下来，下次遇到直接搜。</p>
+          <div class="empty-actions">
+            <button class="btn btn-primary" id="btnEmptyNew">
+              <svg width="16" height="16"><use href="#i-plus"/></svg>登记第一条
+            </button>
+            <button class="btn btn-ghost" id="btnEmptyImport">导入已有表格</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 编辑器 ---------- -->
+      <section class="view" id="view-editor">
+        <div class="view-head">
+          <div>
+            <button class="link-btn back-link" id="btnBackFromEdit">
+              <svg width="14" height="14"><use href="#i-chevron-left"/></svg>返回问题库
+            </button>
+            <h1 id="editorTitle">登记新问题</h1>
+            <p class="sub" id="editorSub">问题现象、当时的回复、相关截图，都记在这里</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btnCancelEdit">取消</button>
+            <button class="btn btn-primary" id="btnSave">
+              <svg width="16" height="16"><use href="#i-check"/></svg><span>保存</span>
+            </button>
+          </div>
+        </div>
+
+        <form class="form" id="recordForm" autocomplete="off">
+          <input type="hidden" id="fId">
+
+          <div class="card">
+            <div class="card-body">
+              <div class="field">
+                <label class="label" for="fTitle">标题 <i>*</i><span class="hint">一句话说清是什么问题，方便以后扫一眼就认出来</span></label>
+                <input class="input input-lg" id="fTitle" maxlength="80" placeholder="例：会员卡余额不同步，顾客要求退款">
+              </div>
+
+              <div class="grid-4">
+                <div class="field">
+                  <label class="label" for="fDate">发生日期</label>
+                  <input class="input" type="date" id="fDate">
+                </div>
+                <div class="field">
+                  <label class="label" for="fCategory">分类</label>
+                  <select class="select" id="fCategory"></select>
+                </div>
+                <div class="field">
+                  <label class="label" for="fCustomer">客户 / 供应商</label>
+                  <input class="input" id="fCustomer" list="dlCustomer" maxlength="60" placeholder="门店或公司名称">
+                  <datalist id="dlCustomer"></datalist>
+                </div>
+                <div class="field">
+                  <label class="label" for="fChannel">来源渠道</label>
+                  <select class="select" id="fChannel">
+                    <option value="">未填写</option>
+                    <option>微信</option><option>电话</option><option>邮件</option>
+                    <option>系统工单</option><option>企业微信</option><option>当面/现场</option><option>其他</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div class="field">
+                  <label class="label" for="fStatus">处理状态</label>
+                  <select class="select" id="fStatus">
+                    <option value="已解决">已解决</option>
+                    <option value="跟进中">跟进中</option>
+                    <option value="未解决">未解决</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="label" for="fTags">标签<span class="hint">回车添加，用于快速归类检索</span></label>
+                  <div class="tag-input" id="tagBox">
+                    <div class="tag-list" id="tagList"></div>
+                    <input id="fTags" class="tag-field" placeholder="输入后回车，如：退款 / 充值" maxlength="20">
+                  </div>
+                  <div class="suggest-tags" id="suggestTags"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-cols">
+            <div class="card card-problem">
+              <div class="card-head">
+                <div class="card-title"><span class="dot dot-problem"></span>问题描述</div>
+                <span class="card-note">客户怎么说的、当时什么现象</span>
+              </div>
+              <div class="card-body">
+                <textarea class="textarea" id="fProblem" rows="7" placeholder="把客户原话、报错提示、操作步骤记清楚。&#10;例：顾客在自助机充值 200 元，余额没到账，订单显示成功，后台查不到流水。"></textarea>
+                <div class="uploader" id="upProblem" tabindex="0">
+                  <div class="upload-grid" id="upProblemGrid"></div>
+                  <div class="upload-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-pick="upProblem">
+                      <svg width="15" height="15"><use href="#i-image"/></svg>添加图片
+                    </button>
+                    <span class="upload-tip">可拖入图片，或直接 Ctrl+V 粘贴截图</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-solution">
+              <div class="card-head">
+                <div class="card-title"><span class="dot dot-solution"></span>解决方法 / 回复话术</div>
+                <span class="card-note">写当时怎么处理的，能直接复制用</span>
+              </div>
+              <div class="card-body">
+                <textarea class="textarea" id="fSolution" rows="7" placeholder="按步骤写最省事：&#10;1. 后台「充值与流水」查询订单号&#10;2. 确认支付成功后手动补单&#10;3. 回复顾客：已为您补录，5 分钟内到账。"></textarea>
+                <div class="uploader" id="upSolution" tabindex="0">
+                  <div class="upload-grid" id="upSolutionGrid"></div>
+                  <div class="upload-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-pick="upSolution">
+                      <svg width="15" height="15"><use href="#i-image"/></svg>添加图片
+                    </button>
+                    <span class="upload-tip">截图、后台操作界面都可以放这里</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <div class="field">
+                <label class="label" for="fNote">备注 / 后续注意<span class="hint">可选。容易踩的坑、要提醒同事的地方</span></label>
+                <textarea class="textarea textarea-sm" id="fNote" rows="3" placeholder="例：这笔单子顾客很在意，后续回访过一次；退款要走财务审批。"></textarea>
+              </div>
+              <div class="form-foot">
+                <label class="switch">
+                  <input type="checkbox" id="fStar">
+                  <span class="switch-track"><i></i></span>
+                  <span>标为重点，下次优先看</span>
+                </label>
+                <div class="form-foot-actions">
+                  <button type="button" class="btn btn-ghost" id="btnCancelEdit2">取消</button>
+                  <button type="submit" class="btn btn-primary btn-lg" id="btnSave2">保存记录</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <!-- ---------- 导入 ---------- -->
+      <section class="view" id="view-import">
+        <div class="view-head">
+          <div>
+            <h1>导入已有表格</h1>
+            <p class="sub">支持 .xlsx / .xls / .csv，导入前可以先确认列对应关系</p>
+          </div>
+        </div>
+
+        <div class="card" id="importStep1">
+          <div class="card-body">
+            <div class="dropzone" id="dropzone">
+              <svg viewBox="0 0 48 48" width="48" height="48">
+                <path d="M24 32V10m0 0l-8 8m8-8l8 8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M8 30v5a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+              </svg>
+              <h3>把表格拖到这里，或点击选择文件</h3>
+              <p>照片列如果是图片链接或文件名，会先保留文字；图片需要导入后单独补传。</p>
+              <button class="btn btn-primary" id="btnPickFile">选择表格文件</button>
+              <input type="file" id="importFile" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden>
+            </div>
+            <div class="import-tips">
+              <div class="tip-item"><b>1</b> 表头最好包含「问题描述 / 解决方法 / 日期 / 客户」这类字样，程序会自动对应。</div>
+              <div class="tip-item"><b>2</b> 一个工作表一张表，多个 sheet 可以分别导入。</div>
+              <div class="tip-item"><b>3</b> 重复记录会自动跳过，可以放心多导几次。</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="importStep2" hidden>
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">第 1 步 · 确认列对应关系</div>
+              <div class="head-inline">
+                <select class="select select-sm" id="sheetSelect" title="选择工作表"></select>
+                <label class="check"><input type="checkbox" id="hasHeader" checked><span>首行是表头</span></label>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="map-grid" id="mapGrid"></div>
+              <div class="import-opt">
+                <label class="check"><input type="checkbox" id="skipDuplicate" checked><span>跳过重复记录（标题 + 问题描述相同）</span></label>
+                <label class="check"><input type="checkbox" id="mergeTitle" checked><span>未填标题时，用问题描述前 30 字自动生成</span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">第 2 步 · 预览</div>
+              <span class="card-note" id="previewInfo"></span>
+            </div>
+            <div class="card-body table-wrap">
+              <table class="preview-table" id="previewTable"></table>
+            </div>
+            <div class="card-foot">
+              <button class="btn btn-ghost" id="btnImportCancel">取消</button>
+              <button class="btn btn-primary" id="btnDoImport">
+                <svg width="16" height="16"><use href="#i-check"/></svg><span>开始导入</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 概览 ---------- -->
+      <section class="view" id="view-stats">
+        <div class="view-head">
+          <div>
+            <h1>数据概览</h1>
+            <p class="sub">看看积累了多少经验，哪些问题最常被翻出来</p>
+          </div>
+        </div>
+        <div class="stat-cards" id="statCards"></div>
+        <div class="grid-2-wide">
+          <div class="card">
+            <div class="card-head"><div class="card-title">分类分布</div></div>
+            <div class="card-body" id="catChart"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div class="card-title">最常查看的记录</div><span class="card-note">按「用过几次」排序</span></div>
+            <div class="card-body" id="topUsed"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">近 14 天登记趋势</div></div>
+          <div class="card-body"><div class="trend" id="trendChart"></div></div>
+        </div>
+      </section>
+
+      <!-- ---------- 设置 ---------- -->
+      <section class="view" id="view-settings">
+        <div class="view-head">
+          <div>
+            <h1>设置与备份</h1>
+            <p class="sub">数据存在这台电脑的浏览器里，建议定期导出备份</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div class="card-title">数据备份</div></div>
+          <div class="card-body">
+            <p class="para">换电脑、清理浏览器数据前，先导出一份完整备份（含图片）。换设备后在新设备上导入即可恢复。</p>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="btnBackupAll">
+                <svg width="16" height="16"><use href="#i-download"/></svg>导出完整备份（.json）
+              </button>
+              <button class="btn btn-ghost" id="btnRestore">
+                <svg width="16" height="16"><use href="#i-upload"/></svg>从备份恢复
+              </button>
+              <button class="btn btn-ghost" id="btnExportCsv">
+                <svg width="16" height="16"><use href="#i-download"/></svg>导出 Excel 可读表格（.csv）
+              </button>
+              <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+            </div>
+            <div class="hint-box">
+              <svg width="15" height="15"><use href="#i-alert"/></svg>
+              <span>备份文件里有你的原始照片，注意别随手发到公开的群或仓库里。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div class="card-title">存储空间</div></div>
+          <div class="card-body">
+            <div class="row-between">
+              <div>
+                <div class="row-title" id="storageDetail">正在统计…</div>
+                <div class="row-sub">照片保存前会自动压缩；清理只删除没有被任何记录引用的图片</div>
+              </div>
+              <button class="btn btn-ghost" id="btnGc">清理未使用图片</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div class="card-title">分类管理</div><span class="card-note">登记时可选的问题分类</span></div>
+          <div class="card-body">
+            <div class="cat-manage" id="catManage"></div>
+            <div class="inline-add">
+              <input class="input" id="newCatInput" placeholder="新增分类，如：设备故障" maxlength="16">
+              <button class="btn btn-ghost" id="btnAddCat">添加</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div class="card-title">外观</div></div>
+          <div class="card-body">
+            <div class="row-between">
+              <div>
+                <div class="row-title">深色模式</div>
+                <div class="row-sub">晚上看不刺眼，设置会保存在本机</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="themeSwitch">
+                <span class="switch-track"><i></i></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="card card-danger">
+          <div class="card-head"><div class="card-title">危险操作</div></div>
+          <div class="card-body">
+            <div class="row-between">
+              <div>
+                <div class="row-title">清空全部记录</div>
+                <div class="row-sub">会连同图片一起删除，且无法恢复。清空前请先导出备份。</div>
+              </div>
+              <button class="btn btn-danger" id="btnWipe">清空数据</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="about">问题手册 v1.0 · 纯本地运行，不上传任何数据 · 建议用 Chrome / Edge 打开</p>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ============ 详情抽屉 ============ -->
+<div class="drawer-mask" id="drawerMask"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-inner" id="drawerInner"></div>
+</aside>
+
+<!-- ============ 图片查看器 ============ -->
+<div class="lightbox" id="lightbox" aria-hidden="true">
+  <button class="lb-close" id="lbClose" aria-label="关闭">×</button>
+  <button class="lb-nav lb-prev" id="lbPrev" aria-label="上一张">
+    <svg width="26" height="26"><use href="#i-chevron-left"/></svg>
+  </button>
+  <img id="lbImg" alt="">
+  <button class="lb-nav lb-next" id="lbNext" aria-label="下一张">
+    <svg width="26" height="26"><use href="#i-chevron-right"/></svg>
+  </button>
+  <div class="lb-count" id="lbCount"></div>
+</div>
+
+<!-- ============ 确认弹窗 ============ -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modalTitle">确认操作</h3>
+    <p id="modalText"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modalCancel">取消</button>
+      <button class="btn btn-danger" id="modalOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="assets/vendor/xlsx.full.min.js"></script>
+<script src="assets/js/db.js"></script>
+<script src="assets/js/importer.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

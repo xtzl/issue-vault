@@ -1,0 +1,17 @@
+# 项目内部数据（记忆、测试脚本、截图），不提交
+.workbuddy/
+.workbuddy
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+
+# 备份文件（含原始照片，不要提交）
+*.json
+!package.json
+问题手册-*.csv
