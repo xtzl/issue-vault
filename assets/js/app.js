@@ -65,6 +65,9 @@
     fCustomer: $('#fCustomer'),
     dlCustomer: $('#dlCustomer'),
     fChannel: $('#fChannel'),
+    fSessionId: $('#fSessionId'),
+    fPhone: $('#fPhone'),
+    legacyChannelField: $('#legacyChannelField'),
     fStatus: $('#fStatus'),
     fTags: $('#fTags'),
     tagList: $('#tagList'),
@@ -104,6 +107,20 @@
     newCatInput: $('#newCatInput'),
     themeSwitch: $('#themeSwitch'),
     themeText: $('#themeText'),
+
+    btnReminder: $('#btnReminder'),
+    bellDot: $('#bellDot'),
+    followNotice: $('#followNotice'),
+    followNoticeText: $('#followNoticeText'),
+    btnViewPending: $('#btnViewPending'),
+    btnDismissNotice: $('#btnDismissNotice'),
+    reminderSwitch: $('#reminderSwitch'),
+    reminderOpts: $('#reminderOpts'),
+    reminderInterval: $('#reminderInterval'),
+    reminderStart: $('#reminderStart'),
+    reminderEnd: $('#reminderEnd'),
+    reminderFlash: $('#reminderFlash'),
+    reminderNext: $('#reminderNext'),
 
     impStep1: $('#importStep1'),
     impStep2: $('#importStep2'),
@@ -335,8 +352,12 @@
     const g = (rec.tags || []).join(' ').toLowerCase();
     const c = String(rec.customer || '').toLowerCase();
     const cat = String(rec.category || '').toLowerCase();
+    const sid = String(rec.sessionId || '').toLowerCase();
+    const ph = String(rec.phone || '').toLowerCase();
     let score = 0;
     tokens.forEach((tk) => {
+      if (sid.indexOf(tk) >= 0) score += 16;   // 用会话 ID 反查是最高频需求
+      if (ph.indexOf(tk) >= 0) score += 12;
       if (t.indexOf(tk) >= 0) score += 10;
       if (g.indexOf(tk) >= 0) score += 7;
       if (c.indexOf(tk) >= 0) score += 5;
@@ -352,14 +373,16 @@
     let list = state.records.slice();
 
     if (state.cat) list = list.filter((r) => r.category === state.cat);
-    if (state.status) list = list.filter((r) => r.status === state.status);
+    if (state.status === '__pending') list = list.filter((r) => r.status !== '已解决');
+    else if (state.status) list = list.filter((r) => r.status === state.status);
     if (state.starOnly) list = list.filter((r) => r.star);
 
     if (tokens.length) {
       list = list.filter((r) => {
         const hay = [
           r.title, r.problem, r.solution, r.note, r.customer,
-          r.category, r.channel, r.status, (r.tags || []).join(' ')
+          r.sessionId, r.phone, r.category, r.channel, r.status,
+          (r.tags || []).join(' ')
         ].join(' ').toLowerCase();
         return tokens.every((t) => hay.indexOf(t) >= 0);
       });
@@ -468,6 +491,7 @@
           '<div class="rc-meta">' +
             '<span class="rc-cat">' + escapeHtml(r.category || CAT_FALLBACK) + '</span>' +
             (r.customer ? '<span>' + escapeHtml(r.customer) + '</span>' : '') +
+            (r.sessionId ? '<span class="rc-sid" title="会话 ID">#' + escapeHtml(r.sessionId) + '</span>' : '') +
             '<span>' + escapeHtml(fmtDate(r.occurredAt)) + '</span>' +
             (imgTotal ? '<span class="rc-imgcount">' + imgTotal + ' 张图</span>' : '') +
             (r.useCount ? '<span>用过 ' + r.useCount + ' 次</span>' : '') +
@@ -528,7 +552,8 @@
     const conds = [];
     if (state.q) conds.push('关键词「' + state.q + '」');
     if (state.cat) conds.push('分类：' + state.cat);
-    if (state.status) conds.push('状态：' + state.status);
+    if (state.status === '__pending') conds.push('待跟进');
+    else if (state.status) conds.push('状态：' + state.status);
     if (state.starOnly) conds.push('只看重点');
     if (conds.length) {
       el.libSub.textContent = conds.join(' · ') + ' · 共 ' + all.length + ' 条';
@@ -593,6 +618,7 @@
   async function reload() {
     state.records = await DB.allRecords();
     state.records.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    checkFollowUps();
   }
 
   /* ---------------- 编辑器 ---------------- */
@@ -639,6 +665,9 @@
     el.fDate.value = todayISO();
     el.fStatus.value = '已解决';
     el.fStar.checked = false;
+    el.fSessionId.value = '';
+    el.fPhone.value = '';
+    el.legacyChannelField.hidden = true;
     state.editorTags = [];
     state.editorImages = { problem: [], solution: [] };
     state.editorNewImages = new Set();
@@ -664,6 +693,10 @@
       renderCategoryOptions(rec.category || CAT_FALLBACK);
       el.fCustomer.value = rec.customer || '';
       el.fChannel.value = rec.channel || '';
+      // 只有旧数据才显示「原来源渠道」
+      el.legacyChannelField.hidden = !rec.channel;
+      el.fSessionId.value = rec.sessionId || '';
+      el.fPhone.value = rec.phone || '';
       el.fStatus.value = rec.status || '已解决';
       el.fProblem.value = rec.problem || '';
       el.fSolution.value = rec.solution || '';
@@ -740,7 +773,9 @@
       occurredAt: el.fDate.value || todayISO(),
       category: el.fCategory.value || CAT_FALLBACK,
       customer: el.fCustomer.value.trim(),
-      channel: el.fChannel.value,
+      sessionId: el.fSessionId.value.trim(),
+      phone: el.fPhone.value.trim(),
+      channel: el.fChannel.value.trim(),
       status: el.fStatus.value,
       problem: el.fProblem.value,
       solution: el.fSolution.value,
@@ -835,7 +870,15 @@
     metaParts.push('<span>' + escapeHtml(r.category || CAT_FALLBACK) + '</span>');
     if (r.customer) metaParts.push('<span>' + escapeHtml(r.customer) + '</span>');
     if (r.occurredAt) metaParts.push('<span>' + escapeHtml(fmtDate(r.occurredAt)) + '</span>');
-    if (r.channel) metaParts.push('<span>' + escapeHtml(r.channel) + '</span>');
+    if (r.sessionId) {
+      metaParts.push('<span class="meta-copy" data-copy-val="' + escapeHtml(r.sessionId) +
+        '" title="点击复制会话 ID">会话 ' + escapeHtml(r.sessionId) + '</span>');
+    }
+    if (r.phone) {
+      metaParts.push('<span class="meta-copy" data-copy-val="' + escapeHtml(r.phone) +
+        '" title="点击复制电话号码">' + escapeHtml(r.phone) + '</span>');
+    }
+    if (r.channel) metaParts.push('<span class="meta-legacy">原渠道 ' + escapeHtml(r.channel) + '</span>');
     if (r.useCount) metaParts.push('<span>用过 ' + r.useCount + ' 次</span>');
 
     const pImgs = r.problemImages || [];
@@ -959,7 +1002,7 @@
   function recordToText(r) {
     const lines = [];
     lines.push('【' + (r.title || '未命名') + '】');
-    const meta = [r.category, r.customer, r.occurredAt, r.channel].filter(Boolean);
+    const meta = [r.category, r.customer, r.sessionId ? '会话 ' + r.sessionId : '', r.phone, r.occurredAt].filter(Boolean);
     if (meta.length) lines.push(meta.join(' · '));
     if (r.problem) { lines.push(''); lines.push('问题：'); lines.push(r.problem); }
     if (r.solution) { lines.push(''); lines.push('解决方法：'); lines.push(r.solution); }
@@ -1081,6 +1124,7 @@
       '<span class="cat-item">' + escapeHtml(c) +
       '<button data-rmcat="' + escapeHtml(c) + '" title="删除分类">×</button></span>'
     ).join('');
+    renderReminderUI();
   }
 
   async function updateStorage() {
@@ -1102,14 +1146,14 @@
 
   /* ---------------- 导出 ---------------- */
   function toCSV(records) {
-    const head = ['标题', '发生日期', '分类', '客户/供应商', '渠道', '状态', '问题描述', '解决方法', '备注', '标签', '使用次数', '更新时间'];
+    const head = ['标题', '发生日期', '分类', '客户/供应商', '会话ID', '电话', '状态', '问题描述', '解决方法', '备注', '标签', '使用次数', '更新时间'];
     const esc = (v) => {
       const s = String(v == null ? '' : v).replace(/\r\n/g, '\n');
       if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
       return s;
     };
     const rows = records.map((r) => [
-      r.title, r.occurredAt, r.category, r.customer, r.channel, r.status,
+      r.title, r.occurredAt, r.category, r.customer, r.sessionId, r.phone, r.status,
       r.problem, r.solution, r.note, (r.tags || []).join('、'),
       r.useCount || 0,
       r.updatedAt ? new Date(r.updatedAt).toLocaleString('zh-CN') : ''
@@ -1157,6 +1201,179 @@
   function toggleTheme() {
     const cur = document.documentElement.getAttribute('data-theme');
     applyTheme(cur === 'dark' ? 'light' : 'dark');
+  }
+
+  /* ---------------- 登记提醒 ---------------- */
+  const REMINDER_KEY = 'vault-reminder';
+  const NOTICE_KEY = 'vault-notice-date';
+  const DEFAULT_REMINDER = {
+    enabled: false, interval: 60, start: '09:00', end: '18:00', flash: true, lastAt: 0
+  };
+
+  function getReminder() {
+    try {
+      const raw = localStorage.getItem(REMINDER_KEY);
+      if (raw) return Object.assign({}, DEFAULT_REMINDER, JSON.parse(raw));
+    } catch (e) { /* ignore */ }
+    return Object.assign({}, DEFAULT_REMINDER);
+  }
+
+  function saveReminder(cfg) {
+    try { localStorage.setItem(REMINDER_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ }
+    renderReminderUI();
+  }
+
+  function minutesOf(hhmm) {
+    const p = String(hhmm || '00:00').split(':');
+    return (+p[0] || 0) * 60 + (+p[1] || 0);
+  }
+
+  function inWorkTime(cfg) {
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const s = minutesOf(cfg.start);
+    const e = minutesOf(cfg.end);
+    if (s === e) return true;
+    return s < e ? (cur >= s && cur <= e) : (cur >= s || cur <= e);
+  }
+
+  function intervalText(min) {
+    return min >= 60 ? (min / 60) + ' 小时' : min + ' 分钟';
+  }
+
+  function nextReminderText(cfg) {
+    if (!cfg.enabled) return '开启后，页面开着就会按间隔提醒你登记';
+    if (!inWorkTime(cfg)) return '当前不在工作时间，' + cfg.start + ' 之后开始提醒';
+    const now = Date.now();
+    let next = (cfg.lastAt || 0) + cfg.interval * 60000;
+    if (next <= now) return '下一次检查就会提醒';
+    const d = new Date(next);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return '下次提醒约 ' + hh + ':' + mm;
+  }
+
+  function renderReminderUI() {
+    const cfg = getReminder();
+    if (el.reminderSwitch) el.reminderSwitch.checked = cfg.enabled;
+    if (el.reminderOpts) el.reminderOpts.hidden = !cfg.enabled;
+    if (el.reminderInterval) el.reminderInterval.value = String(cfg.interval);
+    if (el.reminderStart) el.reminderStart.value = cfg.start;
+    if (el.reminderEnd) el.reminderEnd.value = cfg.end;
+    if (el.reminderFlash) el.reminderFlash.checked = !!cfg.flash;
+    if (el.reminderNext) {
+      el.reminderNext.textContent = nextReminderText(cfg);
+      el.reminderNext.classList.toggle('off', !cfg.enabled);
+    }
+    if (el.bellDot) el.bellDot.hidden = !cfg.enabled;
+    if (el.btnReminder) {
+      el.btnReminder.classList.toggle('on', cfg.enabled);
+      el.btnReminder.title = cfg.enabled
+        ? '登记提醒已开启（每 ' + intervalText(cfg.interval) + '）'
+        : '登记提醒';
+    }
+  }
+
+  let remindTimer = null;
+  function startReminderLoop() {
+    if (remindTimer) clearInterval(remindTimer);
+    remindTimer = setInterval(checkReminder, 60000);
+    setTimeout(checkReminder, 25000);
+  }
+
+  function checkReminder() {
+    const cfg = getReminder();
+    if (!cfg.enabled) return;
+    if (document.visibilityState !== 'visible') return;
+    if (state.view === 'editor') return;                       // 正在登记，不打断
+    if (el.lightbox.classList.contains('show')) return;
+    if (el.modalMask.classList.contains('show')) return;
+    if (!inWorkTime(cfg)) return;
+    if (Date.now() - (cfg.lastAt || 0) < cfg.interval * 60000) return;
+    cfg.lastAt = Date.now();
+    saveReminder(cfg);
+    showReminderToast(cfg);
+    if (cfg.flash) flashTitle();
+  }
+
+  function showReminderToast(cfg) {
+    const t = document.createElement('div');
+    t.className = 'toast reminder-toast';
+    t.innerHTML =
+      '<div class="rt-icon"><svg width="17" height="17"><use href="#i-bell"/></svg></div>' +
+      '<div class="rt-body">' +
+        '<div class="rt-title">刚才处理的问题，要不要记一笔？</div>' +
+        '<div class="rt-sub">距上次提醒已经 ' + intervalText(cfg.interval) +
+          '，趁还记得把现象和解决办法存下来</div>' +
+        '<div class="rt-actions">' +
+          '<button class="primary" data-rt="new">去登记</button>' +
+          '<button data-rt="later">稍后 15 分钟</button>' +
+          '<button data-rt="close">关掉</button>' +
+        '</div>' +
+      '</div>';
+    el.toastWrap.appendChild(t);
+
+    t.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-rt]');
+      if (!btn) return;
+      const act = btn.dataset.rt;
+      t.remove();
+      if (act === 'new') {
+        if (state.view !== 'editor') openEditor();
+      } else if (act === 'later') {
+        const c = getReminder();
+        c.lastAt = Date.now() - (c.interval * 60000) + 15 * 60000;
+        saveReminder(c);
+        toast('好，15 分钟后再提醒你');
+      }
+    });
+
+    // 放着不动 25 秒自动收起
+    setTimeout(() => {
+      if (t.isConnected) {
+        t.classList.add('leaving');
+        setTimeout(() => t.remove(), 240);
+      }
+    }, 25000);
+  }
+
+  let titleTimer = null;
+  let titleOriginal = '';
+  function flashTitle() {
+    stopTitleFlash();
+    titleOriginal = document.title.replace(/^⏰\s*/, '');
+    let on = false;
+    let n = 0;
+    titleTimer = setInterval(() => {
+      document.title = on ? ('⏰ 该登记了 · ' + titleOriginal) : titleOriginal;
+      on = !on;
+      if (++n > 14) stopTitleFlash();
+    }, 900);
+  }
+  function stopTitleFlash() {
+    if (titleTimer) {
+      clearInterval(titleTimer);
+      titleTimer = null;
+    }
+    if (titleOriginal) document.title = titleOriginal;
+  }
+
+  /* 每天第一次打开时，提示还没处理完的记录 */
+  function checkFollowUps() {
+    if (!el.followNotice) return;
+    let dismissed = '';
+    try { dismissed = localStorage.getItem(NOTICE_KEY) || ''; } catch (e) { /* ignore */ }
+    if (dismissed === todayISO()) {
+      el.followNotice.hidden = true;
+      return;
+    }
+    const n = state.records.filter((r) => r.status !== '已解决').length;
+    if (!n) {
+      el.followNotice.hidden = true;
+      return;
+    }
+    el.followNoticeText.textContent = '有 ' + n + ' 条记录还没处理完，记得跟进一下';
+    el.followNotice.hidden = false;
   }
 
   /* ---------------- 导入流程 ---------------- */
@@ -1209,7 +1426,8 @@
     { key: 'occurredAt', label: '发生日期' },
     { key: 'category', label: '分类' },
     { key: 'customer', label: '客户 / 供应商' },
-    { key: 'channel', label: '来源渠道' },
+    { key: 'sessionId', label: '会话 ID' },
+    { key: 'phone', label: '电话' },
     { key: 'status', label: '处理状态' },
     { key: 'problem', label: '问题描述', required: true },
     { key: 'solution', label: '解决方法', required: true },
@@ -1608,6 +1826,11 @@
       openEditor(edit.dataset.edit);
       return;
     }
+    const copyVal = t.closest('[data-copy-val]');
+    if (copyVal) {
+      copyText(copyVal.dataset.copyVal, '已复制「' + copyVal.dataset.copyVal + '」');
+      return;
+    }
     const star = t.closest('[data-toggle-star]');
     if (star) {
       const id = star.dataset.toggleStar;
@@ -1695,6 +1918,60 @@
     applyTheme(el.themeSwitch.checked ? 'dark' : 'light');
   };
   $('#btnTheme').onclick = toggleTheme;
+
+  // 登记提醒
+  el.btnReminder.onclick = () => {
+    setView('settings');
+    setTimeout(() => {
+      const card = $('#cardReminder');
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 160);
+  };
+  el.reminderSwitch.onchange = () => {
+    const cfg = getReminder();
+    cfg.enabled = el.reminderSwitch.checked;
+    if (cfg.enabled) cfg.lastAt = Date.now();
+    saveReminder(cfg);
+    if (cfg.enabled) toast('已开启，' + intervalText(cfg.interval) + '后开始提醒');
+  };
+  el.reminderInterval.onchange = () => {
+    const c = getReminder();
+    c.interval = +el.reminderInterval.value || 60;
+    c.lastAt = Date.now();
+    saveReminder(c);
+  };
+  el.reminderStart.onchange = () => {
+    const c = getReminder();
+    c.start = el.reminderStart.value || '09:00';
+    saveReminder(c);
+  };
+  el.reminderEnd.onchange = () => {
+    const c = getReminder();
+    c.end = el.reminderEnd.value || '18:00';
+    saveReminder(c);
+  };
+  el.reminderFlash.onchange = () => {
+    const c = getReminder();
+    c.flash = el.reminderFlash.checked;
+    saveReminder(c);
+  };
+
+  // 待跟进提示条
+  if (el.btnViewPending) {
+    el.btnViewPending.onclick = () => {
+      state.status = '__pending';
+      el.filterStatus.value = '__pending';
+      state.limit = 40;
+      el.followNotice.hidden = true;
+      renderLibrary();
+    };
+  }
+  if (el.btnDismissNotice) {
+    el.btnDismissNotice.onclick = () => {
+      try { localStorage.setItem(NOTICE_KEY, todayISO()); } catch (e) { /* ignore */ }
+      el.followNotice.hidden = true;
+    };
+  }
 
   // 设置：备份
   $('#btnBackupAll').onclick = exportBackup;
@@ -1855,6 +2132,14 @@
     }
   });
 
+  // 回到页面时停止标题闪烁，并补一次提醒检查
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      stopTitleFlash();
+      setTimeout(checkReminder, 3000);
+    }
+  });
+
   /* ---------------- 初始化 ---------------- */
   let _inited = false;
   async function init() {
@@ -1881,6 +2166,8 @@
     el.filterStatus.value = '';
     el.sortBy.value = 'updated';
     resetForm();
+    renderReminderUI();
+    startReminderLoop();
     renderLibrary();
     renderSettings();
     updateStorage();

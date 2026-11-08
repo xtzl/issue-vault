@@ -40,6 +40,7 @@
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8.6a6 6 0 1 0-12 0c0 5-2 6.4-2 6.4h16s-2-1.4-2-6.4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M10 19a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 1 0-5.7-5.7L11.7 6.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 1 0 5.7 5.7l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
   </defs>
 </svg>
@@ -115,6 +116,10 @@
         <kbd class="search-kbd">Ctrl K</kbd>
       </div>
       <div class="topbar-actions">
+        <button class="icon-btn bell-btn" id="btnReminder" title="登记提醒" aria-label="登记提醒">
+          <svg width="19" height="19"><use href="#i-bell"/></svg>
+          <i class="bell-dot" id="bellDot" hidden></i>
+        </button>
         <button class="btn btn-ghost" id="btnExportTop" title="导出当前筛选结果">
           <svg width="16" height="16"><use href="#i-download"/></svg><span class="hide-sm">导出</span>
         </button>
@@ -135,6 +140,13 @@
           </div>
         </div>
 
+        <div class="notice" id="followNotice" hidden>
+          <svg width="16" height="16"><use href="#i-bell"/></svg>
+          <span id="followNoticeText"></span>
+          <button class="link-btn notice-action" id="btnViewPending">去查看</button>
+          <button class="notice-close" id="btnDismissNotice" title="今天不再提示" aria-label="今天不再提示">×</button>
+        </div>
+
         <div class="filterbar" id="filterbar">
           <div class="chips" id="filterCats">
             <button class="chip active" data-cat="">全部</button>
@@ -142,6 +154,7 @@
           <div class="filter-right">
             <select class="select select-sm" id="filterStatus" title="按状态筛选">
               <option value="">全部状态</option>
+              <option value="__pending">待跟进</option>
               <option value="已解决">已解决</option>
               <option value="跟进中">跟进中</option>
               <option value="未解决">未解决</option>
@@ -228,16 +241,16 @@
                   <datalist id="dlCustomer"></datalist>
                 </div>
                 <div class="field">
-                  <label class="label" for="fChannel">来源渠道</label>
-                  <select class="select" id="fChannel">
-                    <option value="">未填写</option>
-                    <option>微信</option><option>电话</option><option>邮件</option>
-                    <option>系统工单</option><option>企业微信</option><option>当面/现场</option><option>其他</option>
-                  </select>
+                  <label class="label" for="fSessionId">会话 ID</label>
+                  <input class="input" id="fSessionId" maxlength="60" placeholder="输入或粘贴会话 ID" spellcheck="false">
                 </div>
               </div>
 
-              <div class="grid-2">
+              <div class="grid-4">
+                <div class="field">
+                  <label class="label" for="fPhone">电话</label>
+                  <input class="input" id="fPhone" type="tel" maxlength="30" placeholder="顾客联系电话" spellcheck="false">
+                </div>
                 <div class="field">
                   <label class="label" for="fStatus">处理状态</label>
                   <select class="select" id="fStatus">
@@ -246,7 +259,7 @@
                     <option value="未解决">未解决</option>
                   </select>
                 </div>
-                <div class="field">
+                <div class="field col-span-2">
                   <label class="label" for="fTags">标签<span class="hint">回车添加，用于快速归类检索</span></label>
                   <div class="tag-input" id="tagBox">
                     <div class="tag-list" id="tagList"></div>
@@ -254,6 +267,11 @@
                   </div>
                   <div class="suggest-tags" id="suggestTags"></div>
                 </div>
+              </div>
+
+              <div class="field" id="legacyChannelField" hidden>
+                <label class="label">原来源渠道<span class="hint">旧数据保留，可选择清空</span></label>
+                <input class="input" id="fChannel" maxlength="30" placeholder="（历史数据）">
               </div>
             </div>
           </div>
@@ -466,6 +484,52 @@
             <div class="inline-add">
               <input class="input" id="newCatInput" placeholder="新增分类，如：设备故障" maxlength="16">
               <button class="btn btn-ghost" id="btnAddCat">添加</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="cardReminder">
+          <div class="card-head">
+            <div class="card-title">登记提醒</div>
+            <span class="card-note">页面开着时，到点提醒你记一笔</span>
+          </div>
+          <div class="card-body">
+            <div class="row-between">
+              <div>
+                <div class="row-title">开启定时提醒</div>
+                <div class="row-sub">在设定的工作时间段内，每隔一段时间提醒一次</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="reminderSwitch">
+                <span class="switch-track"><i></i></span>
+              </label>
+            </div>
+            <div id="reminderOpts" hidden>
+              <div class="grid-2" style="margin-top:18px">
+                <div class="field" style="margin-bottom:0">
+                  <label class="label" for="reminderInterval">提醒间隔</label>
+                  <select class="select" id="reminderInterval">
+                    <option value="30">30 分钟</option>
+                    <option value="45">45 分钟</option>
+                    <option value="60">1 小时</option>
+                    <option value="90">1.5 小时</option>
+                    <option value="120">2 小时</option>
+                  </select>
+                </div>
+                <div class="field" style="margin-bottom:0">
+                  <label class="label">工作时间</label>
+                  <div class="time-range">
+                    <input class="input" type="time" id="reminderStart" value="09:00">
+                    <span>至</span>
+                    <input class="input" type="time" id="reminderEnd" value="18:00">
+                  </div>
+                </div>
+              </div>
+              <label class="check reminder-flash">
+                <input type="checkbox" id="reminderFlash" checked>
+                <span>同时让标签页标题闪烁（切到别的窗口时也能注意到）</span>
+              </label>
+              <p class="reminder-tip" id="reminderNext">—</p>
             </div>
           </div>
         </div>

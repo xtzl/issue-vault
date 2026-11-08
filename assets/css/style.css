@@ -356,6 +356,7 @@ mark{background:#fff2a8;color:inherit;padding:0 1px;border-radius:2px}
 }
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.col-span-2{grid-column:span 2}
 .form-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
 .form-cols .card{height:100%;display:flex;flex-direction:column}
 .form-cols .card-body{flex:1;display:flex;flex-direction:column}
@@ -466,6 +467,9 @@ mark{background:#fff2a8;color:inherit;padding:0 1px;border-radius:2px}
 .dw-title{margin:0;font-size:20px;font-weight:650;line-height:1.4;letter-spacing:-.2px}
 .dw-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-3)}
 .dw-meta span{display:inline-flex;align-items:center;gap:4px;background:var(--surface-2);padding:2px 8px;border-radius:5px}
+.meta-copy{cursor:pointer;transition:background .15s,color .15s}
+.meta-copy:hover{background:var(--primary-soft)!important;color:var(--primary)}
+.meta-legacy{opacity:.6}
 .dw-actions{
   display:flex;gap:8px;padding:12px 22px;border-bottom:1px solid var(--border);
   background:var(--surface-2);position:sticky;top:0;z-index:2;flex-wrap:wrap;
@@ -549,6 +553,60 @@ mark{background:#fff2a8;color:inherit;padding:0 1px;border-radius:2px}
 .toast.leaving{animation:toastOut .2s ease forwards}
 .toast.ok svg{color:#4ade80}
 .toast.err svg{color:#f87171}
+
+/* ---- 登记提醒 ---- */
+.bell-btn{position:relative}
+.bell-btn.on{color:var(--primary)}
+.bell-dot{
+  position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;
+  background:var(--success);border:1.5px solid var(--surface);display:block;
+}
+.notice{
+  display:flex;align-items:center;gap:9px;padding:10px 12px 10px 14px;
+  margin-bottom:14px;border-radius:var(--r-md);
+  background:var(--warn-soft);color:var(--warn);font-size:12.5px;
+  border:1px solid rgba(184,120,19,.16);
+}
+.notice>span{flex:1;min-width:0}
+.notice-action{color:var(--warn);font-weight:600;text-decoration:underline;text-underline-offset:2px;flex:none}
+.notice-close{
+  border:none;background:none;color:inherit;opacity:.55;font-size:16px;line-height:1;
+  cursor:pointer;padding:2px 5px;border-radius:4px;flex:none;
+}
+.notice-close:hover{opacity:1;background:rgba(0,0,0,.06)}
+
+.time-range{display:flex;align-items:center;gap:8px}
+.time-range span{color:var(--text-3);font-size:12px;flex:none}
+.time-range .input{flex:1;min-width:0}
+.reminder-flash{margin-top:18px}
+.reminder-tip{margin:14px 0 0;font-size:12px;color:var(--text-3)}
+.reminder-tip b{color:var(--primary);font-weight:600}
+.reminder-tip.off{color:var(--text-3)}
+
+.toast.reminder-toast{
+  display:flex;align-items:flex-start;gap:11px;
+  pointer-events:auto;max-width:390px;padding:13px 14px;
+  background:var(--surface);color:var(--text);
+  border:1px solid var(--primary-line);
+  box-shadow:0 10px 30px rgba(16,24,40,.16);
+}
+[data-theme="dark"] .toast.reminder-toast{background:var(--surface-2);color:var(--text)}
+.rt-icon{
+  width:32px;height:32px;border-radius:9px;flex:none;
+  background:var(--primary-soft);color:var(--primary);display:grid;place-items:center;
+}
+.rt-body{flex:1;min-width:0}
+.rt-title{font-size:13.5px;font-weight:600;line-height:1.4}
+.rt-sub{font-size:11.5px;color:var(--text-3);line-height:1.5;margin-top:2px}
+.rt-actions{display:flex;gap:7px;margin-top:9px}
+.rt-actions button{
+  height:27px;padding:0 11px;border-radius:6px;font-size:12px;cursor:pointer;
+  border:1px solid var(--border);background:var(--surface);color:var(--text-2);
+  transition:background .15s,border-color .15s;
+}
+.rt-actions button:hover{background:var(--surface-3);border-color:var(--border-strong)}
+.rt-actions button.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.rt-actions button.primary:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
 @keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes toastOut{to{opacity:0;transform:translateX(14px)}}
 
@@ -711,6 +769,7 @@ body.drawer-open .workspace{overflow:hidden}
   .thumb-del{opacity:1;width:22px;height:22px}
   .upload-grid{grid-template-columns:repeat(auto-fill,minmax(76px,1fr))}
   .grid-4,.grid-2{grid-template-columns:1fr}
+  .col-span-2{grid-column:span 1}
   .stat-cards{grid-template-columns:1fr 1fr;gap:10px}
   .record-card{padding:14px}
   .rc-thumbs{display:none}

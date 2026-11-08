@@ -24,8 +24,16 @@ window.Importer = (function () {
       aliases: ['客户', '供应商', '门店', '客户名称', '公司', '商户', '客户/供应商', '客户名', '所属客户', '门店名称']
     },
     {
-      key: 'channel', label: '来源渠道', required: false,
-      aliases: ['渠道', '来源', '联系方式', '沟通方式', '反馈渠道']
+      key: 'sessionId', label: '会话 ID', required: false,
+      aliases: ['会话id', '会话编号', '会话号', '会话', 'sessionid', '对话id', '工单号']
+    },
+    {
+      key: 'phone', label: '电话', required: false,
+      aliases: ['电话', '手机号', '手机', '联系电话', '电话号码', '客户电话', '顾客电话', '联系方式']
+    },
+    {
+      key: 'channel', label: '来源渠道（旧）', required: false,
+      aliases: ['渠道', '来源', '沟通方式', '反馈渠道']
     },
     {
       key: 'status', label: '处理状态', required: false,
@@ -285,6 +293,8 @@ window.Importer = (function () {
       const solution = cellText(val(row, 'solution'));
       let title = cellText(val(row, 'title'));
       const customer = cellText(val(row, 'customer'));
+      const sessionId = cellText(val(row, 'sessionId'));
+      const phone = cellText(val(row, 'phone'));
       const category = cellText(val(row, 'category'));
       const channel = cellText(val(row, 'channel'));
       const note = cellText(val(row, 'note'));
@@ -318,6 +328,8 @@ window.Importer = (function () {
         occurredAt: parseDate(occurredRaw) || new Date().toISOString().slice(0, 10),
         category: category || '其他',
         customer,
+        sessionId,
+        phone,
         channel: channel || '',
         status: normalizeStatus(statusRaw, solution),
         problem: problem + extra,
