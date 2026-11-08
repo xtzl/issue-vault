@@ -128,6 +128,7 @@
     backupNote: $('#backupNote'),
     backupAuto: $('#backupAuto'),
     btnPickFolder: $('#btnPickFolder'),
+    btnBackupDiag: $('#btnBackupDiag'),
 
     impStep1: $('#importStep1'),
     impStep2: $('#importStep2'),
@@ -264,6 +265,7 @@
       el.modalText.innerHTML = opts.text || '';
       el.modalOk.textContent = opts.okText || '确定';
       el.modalOk.className = 'btn ' + (opts.danger === false ? 'btn-primary' : 'btn-danger');
+      el.modalCancel.style.display = opts.hideCancel ? 'none' : '';
       el.modalMask.classList.add('show');
       modalResolve = resolve;
     });
@@ -1229,12 +1231,42 @@
 
   /* ---------------- 自动备份到本地文件夹 ---------------- */
   const BACKUP_FILE = '问题手册备份.json';
-  const FS_SUPPORTED = typeof window.showDirectoryPicker === 'function';
   let _backupDir = null;
   let _backupTimer = null;
   let _backupRunning = false;
   let _lastBackupAt = 0;
   const MIN_BACKUP_GAP = 8000;  // 两次写入最小间隔，避免大数据量时频繁落盘
+
+  /** 判断当前浏览器能不能写本地文件夹，并给出具体原因 */
+  function fsSupportInfo() {
+    if (typeof window.showDirectoryPicker === 'function') {
+      return { ok: true, label: '当前浏览器', reason: '' };
+    }
+    const ua = navigator.userAgent;
+    const chromeV = (ua.match(/Chrome\/(\d+)/) || [])[1];
+    const name = /Edg\//.test(ua) ? 'Edge' : (/Firefox/.test(ua) ? 'Firefox'
+      : (/Safari/.test(ua) && !/Chrome/.test(ua) ? 'Safari' : 'Chrome'));
+
+    if (!window.isSecureContext) {
+      return { ok: false, label: name, reason: '必须通过 https 网址访问（当前不是安全连接）' };
+    }
+    if (name === 'Firefox') {
+      return { ok: false, label: name, reason: 'Firefox 没有提供写入本地文件夹的能力' };
+    }
+    if (name === 'Safari') {
+      return { ok: false, label: name, reason: 'Safari 没有提供写入本地文件夹的能力' };
+    }
+    if (name === 'Chrome' && chromeV && +chromeV < 86) {
+      return { ok: false, label: name, reason: 'Chrome 版本较旧（' + chromeV + '，需要 86 以上）' };
+    }
+    return {
+      ok: false,
+      label: name,
+      reason: '浏览器没有开放这个能力，常见于被企业策略限制、或用无痕模式、或页面被嵌在其他窗口里'
+    };
+  }
+
+  const FS_SUPPORTED = fsSupportInfo().ok;
 
   async function getBackupDir() {
     if (_backupDir) return _backupDir;
@@ -1328,7 +1360,8 @@
     const last = await DB.getMeta('lastBackupAt', 0);
 
     el.autoBackupSwitch.checked = !!on;
-    el.autoBackupSwitch.disabled = !FS_SUPPORTED;
+    // 不再禁用：禁用状态下点了毫无反馈，容易被当成坏了
+    el.autoBackupSwitch.disabled = false;
     if (el.backupPath) el.backupPath.hidden = !on;
     if (el.backupFolder) el.backupFolder.textContent = dir ? (dir.name || '已选文件夹') : '尚未选择文件夹';
     if (el.backupAuto) el.backupAuto.classList.toggle('disabled', !FS_SUPPORTED);
@@ -1336,8 +1369,9 @@
       el.btnPickFolder.textContent = (dir && forceState === 'need-permission') ? '授权继续' : '选择文件夹';
     }
 
+    const info = fsSupportInfo();
     let text;
-    if (!FS_SUPPORTED) text = '当前浏览器不支持（请用 Chrome 或 Edge 打开）';
+    if (!info.ok) text = info.label + ' 暂不支持：' + info.reason;
     else if (forceState === 'need-permission') text = '需要重新授权，点「选择文件夹」确认一次';
     else if (forceState === 'error') text = '写入失败，检查文件夹是否存在、是否有写入权限';
     else if (!on) text = last ? '已关闭 · 上次备份 ' + relTime(last) : '未开启';
@@ -1347,7 +1381,7 @@
     if (el.backupStatus) el.backupStatus.textContent = text;
 
     if (el.backupNote) {
-      const needPick = on && !dir;
+      const needPick = on && !dir && info.ok;
       el.backupNote.hidden = !needPick;
       if (needPick) el.backupNote.textContent = '请选择一个专门放备份的文件夹，例如在 D 盘新建「问题手册备份」。';
     }
@@ -2282,9 +2316,20 @@
     el.autoBackupSwitch.onchange = async () => {
       const on = el.autoBackupSwitch.checked;
       if (on) {
-        if (!FS_SUPPORTED) {
+        const info = fsSupportInfo();
+        if (!info.ok) {
           el.autoBackupSwitch.checked = false;
-          toast('当前浏览器不支持，请用 Chrome 或 Edge', 'err');
+          await confirmDialog({
+            title: info.label + ' 用不了文件夹备份',
+            text: '原因：' + escapeHtml(info.reason) + '<br><br>' +
+              '两个办法：<br>' +
+              '1. 用 <b>Edge</b> 打开同一个网址，在那边开启自动备份（然后把这里的备份文件导过去）<br>' +
+              '2. 继续用 ' + escapeHtml(info.label) +
+              '，但要时不时点下面的「<b>立即导出完整备份</b>」，手动存一份',
+            okText: '知道了',
+            danger: false,
+            hideCancel: true
+          });
           return;
         }
         let dir = await getBackupDir();
@@ -2305,6 +2350,33 @@
         toast('已关闭自动备份');
       }
       renderBackupUI();
+    };
+  }
+
+  if (el.btnBackupDiag) {
+    el.btnBackupDiag.onclick = () => {
+      const info = fsSupportInfo();
+      let top = '是';
+      try { top = (window.top === window.self) ? '是' : '否（被嵌在别的页面里）'; } catch (e) { top = '否'; }
+      const ua = navigator.userAgent;
+      const m = ua.match(/(Chrome|Edg|Firefox|Safari)\/([\d.]+)/);
+      const rows = [
+        '浏览器：' + (m ? m[1] + ' ' + m[2].split('.')[0] : ua.slice(0, 40)),
+        '安全连接（https）：' + (window.isSecureContext ? '是' : '否'),
+        '独立窗口打开：' + top,
+        '文件夹写入能力：' + (typeof window.showDirectoryPicker === 'function' ? '可用' : '不可用'),
+        '判定结果：' + (info.ok ? '可以自动备份' : '不可用 —— ' + info.reason)
+      ];
+      confirmDialog({
+        title: '浏览器能力检测',
+        text: '<div style="font-size:12.5px;line-height:2;word-break:break-all">' +
+          rows.map((r) => escapeHtml(r)).join('<br>') +
+          '</div><p style="margin:14px 0 0;font-size:12px;color:var(--text-3)">' +
+          '把这几行发给我，我就能判断具体卡在哪一步。</p>',
+        okText: '关闭',
+        danger: false,
+        hideCancel: true
+      });
     };
   }
 
@@ -2475,6 +2547,17 @@
     }
   });
 
+  /* 请求持久化存储：减少浏览器在磁盘紧张时自动清理数据的概率 */
+  async function requestPersist() {
+    try {
+      if (!navigator.storage || !navigator.storage.persist) return false;
+      if (await navigator.storage.persisted()) return true;
+      return await navigator.storage.persist();
+    } catch (e) {
+      return false;
+    }
+  }
+
   /* ---------------- 初始化 ---------------- */
   let _inited = false;
   async function init() {
@@ -2493,6 +2576,7 @@
       state.categories = await DB.getCategories();
       await reload();
       // 不在这里自动清理图片：若另一标签页正在编辑，未保存的图片会被误删
+      requestPersist();
     } catch (e) {
       console.error(e);
       toast('数据库初始化失败：' + (e.message || '') + '（请勿直接双击打开 HTML）', 'err');
