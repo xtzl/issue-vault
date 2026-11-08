@@ -292,10 +292,26 @@
     if (name === 'library') renderLibrary();
     if (name === 'stats') renderStats();
     if (name === 'settings') renderSettings();
-    if (name === 'import' && window.Importer) {
-      // 进导入页就开始拉解析库，等选好文件基本已就绪
-      window.Importer.loadXLSX().catch(() => {});
-    }
+    if (name === 'import' && window.Importer) prepareXLSX();
+  }
+
+  /* 进入导入页时准备解析库，并把加载状态显示出来 */
+  function prepareXLSX() {
+    const box = $('#importLoading');
+    if (!box) return;
+    if (window.XLSX) { box.hidden = true; return; }
+    box.hidden = false;
+    const label = box.querySelector('span:last-child');
+    if (label) label.textContent = '正在准备表格解析组件，首次打开需要几秒…';
+    window.Importer.loadXLSX()
+      .then(() => { box.hidden = true; })
+      .catch(() => {
+        box.style.background = 'var(--danger-soft)';
+        box.style.color = 'var(--danger)';
+        if (label) label.textContent = '表格组件加载失败，请检查网络后刷新页面重试';
+        const sp = box.querySelector('.spinner');
+        if (sp) sp.style.display = 'none';
+      });
   }
 
   function openSidebar() {
@@ -1137,6 +1153,7 @@
   /* ---------------- 导入流程 ---------------- */
   async function handleImportFile(file) {
     if (!file) return;
+    if (!window.XLSX) toast('正在加载表格组件，请稍候…');
     try {
       const wb = await Importer.readFile(file);
       const sheetNames = wb.SheetNames || [];

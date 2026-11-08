@@ -544,6 +544,17 @@ mark{background:#fff2a8;color:inherit;padding:0 1px;border-radius:2px}
 @keyframes toastOut{to{opacity:0;transform:translateX(14px)}}
 
 /* ---------- 导入 ---------- */
+.import-loading{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;margin-bottom:14px;
+  border-radius:var(--r-md);background:var(--primary-soft);color:var(--primary);
+  font-size:12.5px;line-height:1.5;
+}
+.spinner{
+  width:15px;height:15px;flex:none;border-radius:50%;
+  border:2px solid currentColor;border-right-color:transparent;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
 .dropzone{
   display:flex;flex-direction:column;align-items:center;text-align:center;
   padding:44px 20px;border:2px dashed var(--border-strong);border-radius:var(--r-lg);
