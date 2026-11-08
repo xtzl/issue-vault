@@ -466,6 +466,78 @@ window.VaultDB = (function () {
     await txDone(tx);
   }
 
+  /**
+   * 把备份里的数据「增量合并」进本地：
+   * - 记录：本地没有的新增，本地有的取 updatedAt 较新的
+   * - 图片：只补本地缺失的
+   * 不会删除本地任何数据，可以放心多浏览器共用同一个备份文件
+   * @returns {Promise<{added:number, updated:number, images:number}>}
+   */
+  async function mergeFromBackup(backup) {
+    if (!backup || !Array.isArray(backup.records)) {
+      return { added: 0, updated: 0, images: 0 };
+    }
+    const db = await open();
+
+    // 现有记录
+    const txRead = db.transaction(STORE_REC, 'readonly');
+    const existing = (await req(txRead.objectStore(STORE_REC).getAll())) || [];
+    const map = new Map(existing.map((r) => [r.id, r]));
+
+    const toPut = [];
+    let added = 0;
+    let updated = 0;
+    backup.records.forEach((r) => {
+      if (!r || !r.id) return;
+      const cur = map.get(r.id);
+      if (!cur) {
+        toPut.push(r);
+        added++;
+      } else if ((r.updatedAt || 0) > (cur.updatedAt || 0)) {
+        toPut.push(r);
+        updated++;
+      }
+    });
+
+    for (const r of toPut) {
+      const tx = db.transaction(STORE_REC, 'readwrite');
+      tx.objectStore(STORE_REC).put(r);
+      await txDone(tx);
+    }
+
+    // 现有图片 id
+    const txKeys = db.transaction(STORE_IMG, 'readonly');
+    const imgKeys = new Set((await req(txKeys.objectStore(STORE_IMG).getAllKeys())) || []);
+
+    let imgCount = 0;
+    for (const im of backup.images || []) {
+      if (!im || !im.id || imgKeys.has(im.id)) continue;
+      try {
+        const full = await dataURLToBlob(im.full);
+        const thumb = im.thumb ? await dataURLToBlob(im.thumb) : full;
+        const tx = db.transaction(STORE_IMG, 'readwrite');
+        tx.objectStore(STORE_IMG).put({
+          id: im.id,
+          full,
+          thumb,
+          w: im.w,
+          h: im.h,
+          size: full.size,
+          thumbSize: thumb.size,
+          type: im.type || 'image/jpeg',
+          name: im.name || '',
+          createdAt: im.createdAt || Date.now()
+        });
+        await txDone(tx);
+        imgCount++;
+      } catch (e) {
+        console.warn('合并图片失败', im.id, e);
+      }
+    }
+
+    return { added, updated, images: imgCount };
+  }
+
   function objectURL(blob) {
     return blob ? URL.createObjectURL(blob) : '';
   }
@@ -476,7 +548,7 @@ window.VaultDB = (function () {
     allRecords, getRecord, saveRecord, deleteRecord, pruneImages, gcImages,
     bumpUseCount, toggleStar,
     getMeta, setMeta, getCategories, setCategories,
-    usage, exportBackup, importBackup, wipeAll, objectURL,
+    usage, exportBackup, importBackup, mergeFromBackup, wipeAll, objectURL,
     DEFAULT_CATEGORIES
   };
 })();

@@ -245,7 +245,7 @@
       a.remove();
     }, 800);
   }
-  function toast(msg, type) {
+  function toast(msg, type, duration) {
     const t = document.createElement('div');
     t.className = 'toast' + (type ? ' ' + type : '');
     const icon = type === 'err' ? '#i-alert' : '#i-check';
@@ -255,7 +255,7 @@
     setTimeout(() => {
       t.classList.add('leaving');
       setTimeout(() => t.remove(), 240);
-    }, 2400);
+    }, duration || 2400);
   }
 
   let modalResolve = null;
@@ -1235,6 +1235,7 @@
   let _backupTimer = null;
   let _backupRunning = false;
   let _lastBackupAt = 0;
+  let _lastFileModified = 0;
   const MIN_BACKUP_GAP = 8000;  // 两次写入最小间隔，避免大数据量时频繁落盘
 
   /** 判断当前浏览器能不能写本地文件夹，并给出具体原因 */
@@ -1310,6 +1311,50 @@
     const w = await fh.createWritable();
     await w.write(text);
     await w.close();
+    return fh;
+  }
+
+  /** 读取文件夹里的备份文件，返回 { data, lastModified } */
+  async function readBackupFile(dir) {
+    try {
+      const fh = await dir.getFileHandle(BACKUP_FILE);
+      const f = await fh.getFile();
+      const text = await f.text();
+      const data = JSON.parse(text);
+      if (!data || !Array.isArray(data.records)) return null;
+      return { data, lastModified: f.lastModified };
+    } catch (e) {
+      return null;   // 文件不存在或读不了
+    }
+  }
+
+  /**
+   * 从备份文件同步到本地（只增不删，按更新时间取新）
+   * @returns {Promise<{added:number, updated:number, images:number}|null>}
+   */
+  async function syncFromBackup(dir, silent) {
+    const file = await readBackupFile(dir);
+    if (!file) return null;
+    let res;
+    try {
+      res = await DB.mergeFromBackup(file.data);
+    } catch (e) {
+      console.warn('同步备份失败', e);
+      return null;
+    }
+    const changed = res && (res.added || res.updated);
+    try { await DB.setMeta('backupFileRecords', file.data.records.length); } catch (e) { /* ignore */ }
+    if (changed) {
+      await reload();
+      renderLibrary();
+      if (!silent) {
+        const parts = [];
+        if (res.added) parts.push('新增 ' + res.added + ' 条');
+        if (res.updated) parts.push('更新 ' + res.updated + ' 条');
+        toast('已从备份文件同步：' + parts.join('、'), '', 5000);
+      }
+    }
+    return res;
   }
 
   async function runAutoBackup() {
@@ -1329,10 +1374,20 @@
     }
     _backupRunning = true;
     try {
+      // 写之前先看一眼文件：如果别的浏览器刚写过，先把它并进来，避免互相覆盖
+      const file = await readBackupFile(dir);
+      if (file && file.lastModified > _lastFileModified) {
+        await DB.mergeFromBackup(file.data);
+      }
       const data = await DB.exportBackup();
-      await writeBackupFile(dir, JSON.stringify(data));
+      const fh = await writeBackupFile(dir, JSON.stringify(data));
+      try {
+        const f = await fh.getFile();
+        _lastFileModified = f.lastModified;
+      } catch (e) { /* ignore */ }
       _lastBackupAt = Date.now();
       await DB.setMeta('lastBackupAt', _lastBackupAt);
+      await DB.setMeta('backupFileRecords', data.records.length);
       renderBackupUI();
       return true;
     } catch (e) {
@@ -1351,6 +1406,23 @@
       clearTimeout(_backupTimer);
       _backupTimer = setTimeout(() => { runAutoBackup(); }, 3000);
     }).catch(() => { /* ignore */ });
+  }
+
+  /** 打开页面时先和备份文件夹对一次数据，多浏览器共用同一文件夹时靠它同步 */
+  async function initBackupSync() {
+    if (!FS_SUPPORTED) return;
+    const on = await DB.getMeta('autoBackup', false);
+    if (!on) return;
+    const dir = await getBackupDir();
+    if (!dir) return;
+    if (!await dirPermission(dir, false)) {
+      renderBackupUI('need-permission');
+      return;
+    }
+    const file = await readBackupFile(dir);
+    if (!file) return;
+    _lastFileModified = file.lastModified;
+    await syncFromBackup(dir, false);
   }
 
   async function renderBackupUI(forceState) {
@@ -1379,6 +1451,11 @@
     else if (last) text = '已开启 · 上次备份 ' + relTime(last);
     else text = '已开启，等待第一次写入';
     if (el.backupStatus) el.backupStatus.textContent = text;
+    // 显示备份文件里的条数，方便确认两个浏览器是同一份
+    if (on && dir && info.ok) {
+      const n = await DB.getMeta('backupFileRecords', 0);
+      if (n) el.backupStatus.textContent = text + ' · 文件里 ' + n + ' 条';
+    }
 
     if (el.backupNote) {
       const needPick = on && !dir && info.ok;
@@ -2308,6 +2385,12 @@
       await DB.setMeta('autoBackup', true);
       await renderBackupUI();
       toast('备份位置已设为「' + (dir.name || '所选文件夹') + '」');
+      // 文件夹里可能已经有别的浏览器写的数据，先并进来再写
+      const file = await readBackupFile(dir);
+      if (file) {
+        _lastFileModified = file.lastModified;
+        await syncFromBackup(dir, false);
+      }
       const done = await runAutoBackup();
       if (done) toast('已写入第一份备份');
     };
@@ -2591,6 +2674,9 @@
     renderLibrary();
     renderSettings();
     updateStorage();
+
+    // 稍后与备份文件对一次数据，避免拖慢首屏
+    setTimeout(() => { initBackupSync().catch(() => { /* ignore */ }); }, 1500);
   }
 
   document.addEventListener('DOMContentLoaded', init);
