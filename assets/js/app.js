@@ -292,6 +292,10 @@
     if (name === 'library') renderLibrary();
     if (name === 'stats') renderStats();
     if (name === 'settings') renderSettings();
+    if (name === 'import' && window.Importer) {
+      // 进导入页就开始拉解析库，等选好文件基本已就绪
+      window.Importer.loadXLSX().catch(() => {});
+    }
   }
 
   function openSidebar() {

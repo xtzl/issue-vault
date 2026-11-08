@@ -61,6 +61,29 @@ window.Importer = (function () {
     }
   ];
 
+  /* ---------- 按需加载 SheetJS ----------
+     解析库将近 1MB，首屏不加载，点「导入表格」时才拉，避免拖慢打开速度 */
+  let _xlsxPromise = null;
+
+  function loadXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (_xlsxPromise) return _xlsxPromise;
+    _xlsxPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'assets/vendor/xlsx.full.min.js';
+      s.onload = () => {
+        if (window.XLSX) resolve(window.XLSX);
+        else reject(new Error('表格解析组件加载异常'));
+      };
+      s.onerror = () => {
+        _xlsxPromise = null;
+        reject(new Error('表格解析组件加载失败，请检查网络后重试'));
+      };
+      document.head.appendChild(s);
+    });
+    return _xlsxPromise;
+  }
+
   /* ---------- 文本解码（兼容 GBK 的 CSV） ---------- */
   function decodeText(buf) {
     const bytes = new Uint8Array(buf);
@@ -80,7 +103,7 @@ window.Importer = (function () {
   }
 
   async function readFile(file) {
-    if (!window.XLSX) throw new Error('表格解析组件未加载，请刷新页面重试');
+    await loadXLSX();
     const name = (file.name || '').toLowerCase();
     const buf = await file.arrayBuffer();
 
@@ -314,7 +337,7 @@ window.Importer = (function () {
 
   return {
     FIELDS, readFile, parseSheet, autoMap,
-    buildRecords, parseDate, cellText,
+    buildRecords, parseDate, cellText, loadXLSX,
     __norm: norm
   };
 })();
