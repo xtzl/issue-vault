@@ -121,6 +121,14 @@
     btnTestRemind: $('#btnTestRemind'),
     reminderPending: $('#reminderPending'),
 
+    autoBackupSwitch: $('#autoBackupSwitch'),
+    backupStatus: $('#backupStatus'),
+    backupPath: $('#backupPath'),
+    backupFolder: $('#backupFolder'),
+    backupNote: $('#backupNote'),
+    backupAuto: $('#backupAuto'),
+    btnPickFolder: $('#btnPickFolder'),
+
     impStep1: $('#importStep1'),
     impStep2: $('#importStep2'),
     dropzone: $('#dropzone'),
@@ -533,10 +541,12 @@
       el.emptyLibrary.querySelector('p').textContent = '把处理过的问题和回复方法记下来，下次遇到直接搜。';
       el.emptyLibrary.querySelector('.empty-actions').innerHTML =
         '<button class="btn btn-primary" id="btnEmptyNew"><svg width="16" height="16"><use href="#i-plus"/></svg>登记第一条</button>' +
-        '<button class="btn btn-ghost" id="btnEmptyImport">导入已有表格</button>';
-      const n = $('#btnEmptyNew'), i = $('#btnEmptyImport');
+        '<button class="btn btn-ghost" id="btnEmptyImport">导入已有表格</button>' +
+        '<button class="btn btn-ghost" id="btnEmptyRestore">从备份恢复</button>';
+      const n = $('#btnEmptyNew'), i = $('#btnEmptyImport'), rs = $('#btnEmptyRestore');
       if (n) n.onclick = () => openEditor();
       if (i) i.onclick = () => setView('import');
+      if (rs) rs.onclick = () => $('#restoreFile').click();
     }
 
     // 无记录时不显示筛选条
@@ -624,6 +634,7 @@
     checkFollowUps();
     updateReminderBadge();
     checkRecordReminders();
+    scheduleAutoBackup();
   }
 
   /* ---------------- 编辑器 ---------------- */
@@ -1152,6 +1163,7 @@
     ).join('');
     renderNotifyUI();
     updateReminderBadge();
+    renderBackupUI();
   }
 
   async function updateStorage() {
@@ -1213,6 +1225,132 @@
     const blob = new Blob([toCSV(list)], { type: 'text/csv;charset=utf-8' });
     downloadBlob(blob, '问题手册-' + stamp() + '.csv');
     toast('已导出 ' + list.length + ' 条记录');
+  }
+
+  /* ---------------- 自动备份到本地文件夹 ---------------- */
+  const BACKUP_FILE = '问题手册备份.json';
+  const FS_SUPPORTED = typeof window.showDirectoryPicker === 'function';
+  let _backupDir = null;
+  let _backupTimer = null;
+  let _backupRunning = false;
+  let _lastBackupAt = 0;
+  const MIN_BACKUP_GAP = 8000;  // 两次写入最小间隔，避免大数据量时频繁落盘
+
+  async function getBackupDir() {
+    if (_backupDir) return _backupDir;
+    try {
+      const h = await DB.getMeta('backupDir', null);
+      if (h && h.kind === 'directory') _backupDir = h;
+    } catch (e) { /* ignore */ }
+    return _backupDir;
+  }
+
+  async function dirPermission(dir, request) {
+    if (!dir) return false;
+    const opts = { mode: 'readwrite' };
+    try {
+      if (await dir.queryPermission(opts) === 'granted') return true;
+      if (request && await dir.requestPermission(opts) === 'granted') return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  async function pickBackupFolder() {
+    if (!FS_SUPPORTED) {
+      toast('当前浏览器不支持选择文件夹，请用 Chrome 或 Edge', 'err');
+      return null;
+    }
+    try {
+      const dir = await window.showDirectoryPicker({ id: 'vault-backup', mode: 'readwrite' });
+      _backupDir = dir;
+      await DB.setMeta('backupDir', dir);
+      return dir;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return null;
+      console.error(e);
+      toast('选择文件夹失败：' + (e.message || ''), 'err');
+      return null;
+    }
+  }
+
+  async function writeBackupFile(dir, text) {
+    const fh = await dir.getFileHandle(BACKUP_FILE, { create: true });
+    const w = await fh.createWritable();
+    await w.write(text);
+    await w.close();
+  }
+
+  async function runAutoBackup() {
+    if (_backupRunning || !FS_SUPPORTED) return false;
+    const dir = await getBackupDir();
+    if (!dir) { renderBackupUI('no-dir'); return false; }
+    if (!await dirPermission(dir, false)) {
+      renderBackupUI('need-permission');
+      return false;
+    }
+    // 距上次写入太近就顺延，保证最终会写一次
+    const gap = Date.now() - _lastBackupAt;
+    if (_lastBackupAt && gap < MIN_BACKUP_GAP) {
+      clearTimeout(_backupTimer);
+      _backupTimer = setTimeout(() => { runAutoBackup(); }, MIN_BACKUP_GAP - gap);
+      return false;
+    }
+    _backupRunning = true;
+    try {
+      const data = await DB.exportBackup();
+      await writeBackupFile(dir, JSON.stringify(data));
+      _lastBackupAt = Date.now();
+      await DB.setMeta('lastBackupAt', _lastBackupAt);
+      renderBackupUI();
+      return true;
+    } catch (e) {
+      console.error('自动备份失败', e);
+      renderBackupUI('error');
+      return false;
+    } finally {
+      _backupRunning = false;
+    }
+  }
+
+  function scheduleAutoBackup() {
+    if (!FS_SUPPORTED) return;
+    DB.getMeta('autoBackup', false).then((on) => {
+      if (!on) return;
+      clearTimeout(_backupTimer);
+      _backupTimer = setTimeout(() => { runAutoBackup(); }, 3000);
+    }).catch(() => { /* ignore */ });
+  }
+
+  async function renderBackupUI(forceState) {
+    if (!el.autoBackupSwitch) return;
+    const on = FS_SUPPORTED ? await DB.getMeta('autoBackup', false) : false;
+    const dir = await getBackupDir();
+    const last = await DB.getMeta('lastBackupAt', 0);
+
+    el.autoBackupSwitch.checked = !!on;
+    el.autoBackupSwitch.disabled = !FS_SUPPORTED;
+    if (el.backupPath) el.backupPath.hidden = !on;
+    if (el.backupFolder) el.backupFolder.textContent = dir ? (dir.name || '已选文件夹') : '尚未选择文件夹';
+    if (el.backupAuto) el.backupAuto.classList.toggle('disabled', !FS_SUPPORTED);
+    if (el.btnPickFolder) {
+      el.btnPickFolder.textContent = (dir && forceState === 'need-permission') ? '授权继续' : '选择文件夹';
+    }
+
+    let text;
+    if (!FS_SUPPORTED) text = '当前浏览器不支持（请用 Chrome 或 Edge 打开）';
+    else if (forceState === 'need-permission') text = '需要重新授权，点「选择文件夹」确认一次';
+    else if (forceState === 'error') text = '写入失败，检查文件夹是否存在、是否有写入权限';
+    else if (!on) text = last ? '已关闭 · 上次备份 ' + relTime(last) : '未开启';
+    else if (!dir) text = '已开启，但还没选文件夹';
+    else if (last) text = '已开启 · 上次备份 ' + relTime(last);
+    else text = '已开启，等待第一次写入';
+    if (el.backupStatus) el.backupStatus.textContent = text;
+
+    if (el.backupNote) {
+      const needPick = on && !dir;
+      el.backupNote.hidden = !needPick;
+      if (needPick) el.backupNote.textContent = '请选择一个专门放备份的文件夹，例如在 D 盘新建「问题手册备份」。';
+    }
   }
 
   /* ---------------- 主题 ---------------- */
@@ -2117,6 +2255,59 @@
     };
   }
 
+  // 设置：自动备份
+  if (el.btnPickFolder) {
+    el.btnPickFolder.onclick = async () => {
+      // 之前选过但权限过期：先就地续期，不用重新挑文件夹
+      const existing = await getBackupDir();
+      if (existing && !(await dirPermission(existing, false))) {
+        const ok = await dirPermission(existing, true);
+        if (ok) {
+          await renderBackupUI();
+          toast('已恢复备份权限');
+          await runAutoBackup();
+          return;
+        }
+      }
+      const dir = await pickBackupFolder();
+      if (!dir) return;
+      await DB.setMeta('autoBackup', true);
+      await renderBackupUI();
+      toast('备份位置已设为「' + (dir.name || '所选文件夹') + '」');
+      const done = await runAutoBackup();
+      if (done) toast('已写入第一份备份');
+    };
+  }
+  if (el.autoBackupSwitch) {
+    el.autoBackupSwitch.onchange = async () => {
+      const on = el.autoBackupSwitch.checked;
+      if (on) {
+        if (!FS_SUPPORTED) {
+          el.autoBackupSwitch.checked = false;
+          toast('当前浏览器不支持，请用 Chrome 或 Edge', 'err');
+          return;
+        }
+        let dir = await getBackupDir();
+        if (!dir) {
+          dir = await pickBackupFolder();
+          if (!dir) { el.autoBackupSwitch.checked = false; return; }
+        } else if (!await dirPermission(dir, true)) {
+          toast('需要授权才能写入这个文件夹', 'err');
+          el.autoBackupSwitch.checked = false;
+          return;
+        }
+        await DB.setMeta('autoBackup', true);
+        toast('已开启自动备份');
+        const ok = await runAutoBackup();
+        if (ok) toast('已写入第一份备份');
+      } else {
+        await DB.setMeta('autoBackup', false);
+        toast('已关闭自动备份');
+      }
+      renderBackupUI();
+    };
+  }
+
   // 设置：备份
   $('#btnBackupAll').onclick = exportBackup;
   $('#btnExportCsv').onclick = () => exportCSV(state.records);
@@ -2311,6 +2502,7 @@
     el.sortBy.value = 'updated';
     resetForm();
     renderNotifyUI();
+    renderBackupUI();
     startReminderLoop();
     renderLibrary();
     renderSettings();

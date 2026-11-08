@@ -194,6 +194,7 @@
               <svg width="16" height="16"><use href="#i-plus"/></svg>登记第一条
             </button>
             <button class="btn btn-ghost" id="btnEmptyImport">导入已有表格</button>
+            <button class="btn btn-ghost" id="btnEmptyRestore">从备份恢复</button>
           </div>
         </div>
       </section>
@@ -450,22 +451,45 @@
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-head"><div class="card-title">数据备份</div></div>
+        <div class="card" id="cardBackup">
+          <div class="card-head">
+            <div class="card-title">数据备份</div>
+            <span class="card-note">记录在浏览器里，这里同步一份到硬盘</span>
+          </div>
           <div class="card-body">
-            <p class="para">换电脑、清理浏览器数据前，先导出一份完整备份（含图片）。换设备后在新设备上导入即可恢复。</p>
-            <div class="btn-row">
+            <p class="para">记录存在这个浏览器的本地数据库里。<b>清理浏览器数据、换一个浏览器，都会看不到</b>，所以建议开启下面的自动备份：每隔几秒把最新数据写进硬盘上的一个普通文件，清缓存、换浏览器都不影响它。</p>
+
+            <div class="backup-auto" id="backupAuto">
+              <div class="row-between">
+                <div>
+                  <div class="row-title">自动备份到本地文件夹</div>
+                  <div class="row-sub" id="backupStatus">未开启</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="autoBackupSwitch">
+                  <span class="switch-track"><i></i></span>
+                </label>
+              </div>
+              <div class="backup-path" id="backupPath" hidden>
+                <span class="backup-folder" id="backupFolder" title="备份位置">—</span>
+                <button class="btn btn-ghost btn-sm" id="btnPickFolder" type="button">选择文件夹</button>
+              </div>
+              <p class="backup-note" id="backupNote" hidden></p>
+            </div>
+
+            <div class="btn-row" style="margin-top:18px">
               <button class="btn btn-primary" id="btnBackupAll">
-                <svg width="16" height="16"><use href="#i-download"/></svg>导出完整备份（.json）
+                <svg width="16" height="16"><use href="#i-download"/></svg>立即导出完整备份
               </button>
               <button class="btn btn-ghost" id="btnRestore">
                 <svg width="16" height="16"><use href="#i-upload"/></svg>从备份恢复
               </button>
               <button class="btn btn-ghost" id="btnExportCsv">
-                <svg width="16" height="16"><use href="#i-download"/></svg>导出 Excel 可读表格（.csv）
+                <svg width="16" height="16"><use href="#i-download"/></svg>导出 CSV 表格
               </button>
               <input type="file" id="restoreFile" accept=".json,application/json" hidden>
             </div>
+
             <div class="hint-box">
               <svg width="15" height="15"><use href="#i-alert"/></svg>
               <span>备份文件里有你的原始照片，注意别随手发到公开的群或仓库里。</span>
