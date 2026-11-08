@@ -265,13 +265,15 @@
   }
 
   async function fillThumbs(container) {
-    const nodes = $$('[data-thumb]', container || document);
+    const nodes = $$('[data-thumb],[data-full-img]', container || document);
     await Promise.all(nodes.map(async (node) => {
       if (node.dataset.filled) return;
-      const id = node.dataset.thumb;
+      const fullId = node.dataset.fullImg;
+      const id = fullId || node.dataset.thumb;
       if (!id) return;
       try {
-        const url = await ensureUrl(id, 'thumb');
+        // 详情页用原图，列表和上传区用缩略图
+        const url = await ensureUrl(id, fullId ? 'full' : 'thumb');
         if (url && node.isConnected) {
           if (node.tagName === 'IMG') node.src = url;
           else node.style.backgroundImage = 'url(' + JSON.stringify(url) + ')';
@@ -446,7 +448,7 @@
     let thumbHtml = '';
     if (thumbs.length) {
       thumbHtml = '<div class="rc-thumbs">' +
-        thumbs.map((id) => '<img data-thumb="' + escapeHtml(id) + '" alt="">').join('') +
+        thumbs.map((id) => '<img data-thumb="' + escapeHtml(id) + '" alt="" loading="lazy" decoding="async">').join('') +
         '</div>';
     }
 
@@ -841,9 +843,16 @@
     const imgGrid = (ids, group) => {
       if (!ids.length) return '';
       const cls = ids.length === 1 ? ' single' : (ids.length === 2 ? ' double' : '');
+      // 一到两张用原图保证清晰；多图用缩略图，省内存
+      const useFull = ids.length <= 2;
       return '<div class="dw-images' + cls + '">' +
-        ids.map((id, i) => '<img data-thumb="' + escapeHtml(id) + '" data-full="' + escapeHtml(id) +
-          '" data-group="' + group + '" data-index="' + i + '" alt="">').join('') +
+        ids.map((id, i) => {
+          const src = useFull
+            ? 'data-full-img="' + escapeHtml(id) + '"'
+            : 'data-thumb="' + escapeHtml(id) + '"';
+          return '<img ' + src + ' data-full="' + escapeHtml(id) +
+            '" data-group="' + group + '" data-index="' + i + '" alt="" loading="lazy" decoding="async">';
+        }).join('') +
         '</div>';
     };
 
@@ -1468,10 +1477,15 @@
     }
   });
 
+  // 光标落在哪个描述框，粘贴就进哪边的图片区
+  el.fProblem.addEventListener('focus', () => { state.lastUploader = 'problem'; });
+  el.fSolution.addEventListener('focus', () => { state.lastUploader = 'solution'; });
+
   // 图片上传
   $$('[data-pick]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const kind = btn.dataset.pick === 'upSolution' ? 'solution' : 'problem';
+      state.lastUploader = kind;
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
@@ -1526,6 +1540,16 @@
     });
   });
 
+  /* 判断当前粘贴应该落在哪个图片区：优先看焦点，再看最后点过的区域 */
+  function currentUploaderKind() {
+    const ae = document.activeElement;
+    if (ae) {
+      if (ae === el.fSolution || el.upSolution.contains(ae)) return 'solution';
+      if (ae === el.fProblem || el.upProblem.contains(ae)) return 'problem';
+    }
+    return state.lastUploader || 'problem';
+  }
+
   // 粘贴
   document.addEventListener('paste', (e) => {
     if (state.view !== 'editor') return;
@@ -1540,7 +1564,9 @@
     }
     if (files.length) {
       e.preventDefault();
-      addFilesToUploader(state.lastUploader || 'problem', files);
+      const kind = currentUploaderKind();
+      state.lastUploader = kind;
+      addFilesToUploader(kind, files);
     }
   });
 
