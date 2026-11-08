@@ -67,6 +67,8 @@
     fChannel: $('#fChannel'),
     fSessionId: $('#fSessionId'),
     fPhone: $('#fPhone'),
+    fRemindAt: $('#fRemindAt'),
+    quickRemind: $('#quickRemind'),
     legacyChannelField: $('#legacyChannelField'),
     fStatus: $('#fStatus'),
     fTags: $('#fTags'),
@@ -109,18 +111,15 @@
     themeText: $('#themeText'),
 
     btnReminder: $('#btnReminder'),
-    bellDot: $('#bellDot'),
+    bellCount: $('#bellCount'),
     followNotice: $('#followNotice'),
     followNoticeText: $('#followNoticeText'),
     btnViewPending: $('#btnViewPending'),
     btnDismissNotice: $('#btnDismissNotice'),
-    reminderSwitch: $('#reminderSwitch'),
-    reminderOpts: $('#reminderOpts'),
-    reminderInterval: $('#reminderInterval'),
-    reminderStart: $('#reminderStart'),
-    reminderEnd: $('#reminderEnd'),
-    reminderFlash: $('#reminderFlash'),
-    reminderNext: $('#reminderNext'),
+    notifySwitch: $('#notifySwitch'),
+    notifyStatus: $('#notifyStatus'),
+    btnTestRemind: $('#btnTestRemind'),
+    reminderPending: $('#reminderPending'),
 
     impStep1: $('#importStep1'),
     impStep2: $('#importStep2'),
@@ -492,6 +491,10 @@
             '<span class="rc-cat">' + escapeHtml(r.category || CAT_FALLBACK) + '</span>' +
             (r.customer ? '<span>' + escapeHtml(r.customer) + '</span>' : '') +
             (r.sessionId ? '<span class="rc-sid" title="会话 ID">#' + escapeHtml(r.sessionId) + '</span>' : '') +
+            (r.remindAt && !r.remindDone
+              ? '<span class="rc-remind' + (new Date(r.remindAt).getTime() <= Date.now() ? ' due' : '') +
+                '">提醒 ' + escapeHtml(fmtRemind(r.remindAt)) + '</span>'
+              : '') +
             '<span>' + escapeHtml(fmtDate(r.occurredAt)) + '</span>' +
             (imgTotal ? '<span class="rc-imgcount">' + imgTotal + ' 张图</span>' : '') +
             (r.useCount ? '<span>用过 ' + r.useCount + ' 次</span>' : '') +
@@ -619,6 +622,8 @@
     state.records = await DB.allRecords();
     state.records.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     checkFollowUps();
+    updateReminderBadge();
+    checkRecordReminders();
   }
 
   /* ---------------- 编辑器 ---------------- */
@@ -667,6 +672,7 @@
     el.fStar.checked = false;
     el.fSessionId.value = '';
     el.fPhone.value = '';
+    el.fRemindAt.value = '';
     el.legacyChannelField.hidden = true;
     state.editorTags = [];
     state.editorImages = { problem: [], solution: [] };
@@ -697,6 +703,7 @@
       el.legacyChannelField.hidden = !rec.channel;
       el.fSessionId.value = rec.sessionId || '';
       el.fPhone.value = rec.phone || '';
+      el.fRemindAt.value = rec.remindAt || '';
       el.fStatus.value = rec.status || '已解决';
       el.fProblem.value = rec.problem || '';
       el.fSolution.value = rec.solution || '';
@@ -775,6 +782,8 @@
       customer: el.fCustomer.value.trim(),
       sessionId: el.fSessionId.value.trim(),
       phone: el.fPhone.value.trim(),
+      remindAt: el.fRemindAt.value || '',
+      remindDone: false,
       channel: el.fChannel.value.trim(),
       status: el.fStatus.value,
       problem: el.fProblem.value,
@@ -815,6 +824,8 @@
         data.createdAt = old.createdAt;
         data.useCount = old.useCount || 0;
         data.source = old.source || 'manual';
+        // 提醒时间没改就保留「已提醒」状态；改了则重新计时
+        data.remindDone = (old.remindAt || '') === (data.remindAt || '') ? !!old.remindDone : false;
       }
     }
 
@@ -835,6 +846,16 @@
     setView('library');
     toast(isEdit ? '已更新' : '已保存');
     updateStorage();
+
+    // 设了提醒但还没开桌面通知时，提醒一次入口
+    if (saved.remindAt && 'Notification' in window &&
+        Notification.permission === 'default' && !notifyEnabled()) {
+      setTimeout(() => {
+        // 已经有到点提醒卡片时不叠加，避免右下角太挤
+        if (document.querySelector('.reminder-toast')) return;
+        toast('提醒已设好。想在别的窗口也收到，去设置里打开「桌面通知」');
+      }, 1800);
+    }
   }
 
   async function cancelEdit() {
@@ -879,6 +900,11 @@
         '" title="点击复制电话号码">' + escapeHtml(r.phone) + '</span>');
     }
     if (r.channel) metaParts.push('<span class="meta-legacy">原渠道 ' + escapeHtml(r.channel) + '</span>');
+    if (r.remindAt) {
+      const due = !r.remindDone && new Date(r.remindAt).getTime() <= Date.now();
+      metaParts.push('<span class="meta-remind' + (due ? ' due' : '') + '">提醒 ' +
+        escapeHtml(fmtRemind(r.remindAt)) + (r.remindDone ? '（已处理）' : '') + '</span>');
+    }
     if (r.useCount) metaParts.push('<span>用过 ' + r.useCount + ' 次</span>');
 
     const pImgs = r.problemImages || [];
@@ -1124,7 +1150,8 @@
       '<span class="cat-item">' + escapeHtml(c) +
       '<button data-rmcat="' + escapeHtml(c) + '" title="删除分类">×</button></span>'
     ).join('');
-    renderReminderUI();
+    renderNotifyUI();
+    updateReminderBadge();
   }
 
   async function updateStorage() {
@@ -1203,138 +1230,224 @@
     applyTheme(cur === 'dark' ? 'light' : 'dark');
   }
 
-  /* ---------------- 登记提醒 ---------------- */
-  const REMINDER_KEY = 'vault-reminder';
+  /* ---------------- 定时提醒（跟着每条记录走） ---------------- */
   const NOTICE_KEY = 'vault-notice-date';
-  const DEFAULT_REMINDER = {
-    enabled: false, interval: 60, start: '09:00', end: '18:00', flash: true, lastAt: 0
-  };
+  const NOTIFY_KEY = 'vault-notify';
+  const CHECK_MS = 30000;
+  const shownReminders = new Set();
 
-  function getReminder() {
-    try {
-      const raw = localStorage.getItem(REMINDER_KEY);
-      if (raw) return Object.assign({}, DEFAULT_REMINDER, JSON.parse(raw));
-    } catch (e) { /* ignore */ }
-    return Object.assign({}, DEFAULT_REMINDER);
+  function notifyEnabled() {
+    try { return localStorage.getItem(NOTIFY_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setNotifyEnabled(on) {
+    try { localStorage.setItem(NOTIFY_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+    renderNotifyUI();
   }
 
-  function saveReminder(cfg) {
-    try { localStorage.setItem(REMINDER_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ }
-    renderReminderUI();
+  function toLocalInput(ts) {
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+      'T' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
-  function minutesOf(hhmm) {
-    const p = String(hhmm || '00:00').split(':');
-    return (+p[0] || 0) * 60 + (+p[1] || 0);
-  }
-
-  function inWorkTime(cfg) {
+  function fmtRemind(v) {
+    if (!v) return '';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
     const now = new Date();
-    const cur = now.getHours() * 60 + now.getMinutes();
-    const s = minutesOf(cfg.start);
-    const e = minutesOf(cfg.end);
-    if (s === e) return true;
-    return s < e ? (cur >= s && cur <= e) : (cur >= s || cur <= e);
-  }
-
-  function intervalText(min) {
-    return min >= 60 ? (min / 60) + ' 小时' : min + ' 分钟';
-  }
-
-  function nextReminderText(cfg) {
-    if (!cfg.enabled) return '开启后，页面开着就会按间隔提醒你登记';
-    if (!inWorkTime(cfg)) return '当前不在工作时间，' + cfg.start + ' 之后开始提醒';
-    const now = Date.now();
-    let next = (cfg.lastAt || 0) + cfg.interval * 60000;
-    if (next <= now) return '下一次检查就会提醒';
-    const d = new Date(next);
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
-    return '下次提醒约 ' + hh + ':' + mm;
+    const same = (a, b) => a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    if (same(d, now)) return '今天 ' + hh + ':' + mm;
+    if (same(d, new Date(now.getTime() + 86400000))) return '明天 ' + hh + ':' + mm;
+    if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':' + mm;
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':' + mm;
   }
 
-  function renderReminderUI() {
-    const cfg = getReminder();
-    if (el.reminderSwitch) el.reminderSwitch.checked = cfg.enabled;
-    if (el.reminderOpts) el.reminderOpts.hidden = !cfg.enabled;
-    if (el.reminderInterval) el.reminderInterval.value = String(cfg.interval);
-    if (el.reminderStart) el.reminderStart.value = cfg.start;
-    if (el.reminderEnd) el.reminderEnd.value = cfg.end;
-    if (el.reminderFlash) el.reminderFlash.checked = !!cfg.flash;
-    if (el.reminderNext) {
-      el.reminderNext.textContent = nextReminderText(cfg);
-      el.reminderNext.classList.toggle('off', !cfg.enabled);
+  function dueReminders() {
+    const now = Date.now();
+    return state.records.filter((r) => {
+      if (!r.remindAt || r.remindDone) return false;
+      const t = new Date(r.remindAt).getTime();
+      return !isNaN(t) && t <= now;
+    });
+  }
+
+  function upcomingReminders() {
+    const now = Date.now();
+    return state.records.filter((r) => {
+      if (!r.remindAt || r.remindDone) return false;
+      const t = new Date(r.remindAt).getTime();
+      return !isNaN(t) && t > now;
+    }).sort((a, b) => new Date(a.remindAt) - new Date(b.remindAt));
+  }
+
+  function updateReminderBadge() {
+    if (!el.bellCount) return;
+    const due = dueReminders();
+    if (due.length) {
+      el.bellCount.textContent = due.length > 9 ? '9+' : String(due.length);
+      el.bellCount.hidden = false;
+      el.btnReminder.classList.add('has-due');
+      el.btnReminder.title = '有 ' + due.length + ' 条提醒到时间了';
+    } else {
+      el.bellCount.hidden = true;
+      el.btnReminder.classList.remove('has-due');
+      el.btnReminder.title = '定时提醒';
     }
-    if (el.bellDot) el.bellDot.hidden = !cfg.enabled;
-    if (el.btnReminder) {
-      el.btnReminder.classList.toggle('on', cfg.enabled);
-      el.btnReminder.title = cfg.enabled
-        ? '登记提醒已开启（每 ' + intervalText(cfg.interval) + '）'
-        : '登记提醒';
+    if (el.reminderPending) {
+      const up = upcomingReminders();
+      if (due.length) {
+        el.reminderPending.textContent = '有 ' + due.length + ' 条已经到时间，等待处理';
+        el.reminderPending.classList.remove('off');
+      } else if (up.length) {
+        el.reminderPending.textContent = '下一条提醒：' + fmtRemind(up[0].remindAt) + '　' + up[0].title;
+        el.reminderPending.classList.remove('off');
+      } else {
+        el.reminderPending.textContent = '当前没有待提醒的记录';
+        el.reminderPending.classList.add('off');
+      }
     }
   }
 
-  let remindTimer = null;
+  function renderNotifyUI() {
+    const supported = 'Notification' in window;
+    const on = notifyEnabled();
+    if (el.notifySwitch) {
+      el.notifySwitch.checked = on && supported;
+      el.notifySwitch.disabled = !supported;
+    }
+    if (el.notifyStatus) {
+      if (!supported) el.notifyStatus.textContent = '当前浏览器不支持桌面通知';
+      else if (Notification.permission === 'denied') el.notifyStatus.textContent = '通知被浏览器拦截了，需要点地址栏左侧的图标重新允许';
+      else if (Notification.permission === 'granted') el.notifyStatus.textContent = on ? '已开启，提醒时会弹出系统通知' : '浏览器已授权，打开开关即可';
+      else el.notifyStatus.textContent = '开启后需要允许浏览器通知';
+    }
+  }
+
+  async function requestNotifyPermission() {
+    if (!('Notification' in window)) {
+      toast('当前浏览器不支持桌面通知', 'err');
+      return false;
+    }
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') {
+      toast('通知被浏览器拦截了，请点地址栏左侧的图标重新允许', 'err');
+      return false;
+    }
+    try {
+      const p = await Notification.requestPermission();
+      return p === 'granted';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function checkRecordReminders() {
+    const due = dueReminders();
+    due.forEach((rec) => {
+      if (shownReminders.has(rec.id)) return;
+      shownReminders.add(rec.id);
+      showRecordReminder(rec, false);
+      if (notifyEnabled()) systemNotify(rec);
+    });
+  }
+
   function startReminderLoop() {
-    if (remindTimer) clearInterval(remindTimer);
-    remindTimer = setInterval(checkReminder, 60000);
-    setTimeout(checkReminder, 25000);
+    setInterval(() => {
+      updateReminderBadge();
+      checkRecordReminders();
+    }, CHECK_MS);
+    setTimeout(() => {
+      updateReminderBadge();
+      checkRecordReminders();
+    }, 2500);
   }
 
-  function checkReminder() {
-    const cfg = getReminder();
-    if (!cfg.enabled) return;
-    if (document.visibilityState !== 'visible') return;
-    if (state.view === 'editor') return;                       // 正在登记，不打断
-    if (el.lightbox.classList.contains('show')) return;
-    if (el.modalMask.classList.contains('show')) return;
-    if (!inWorkTime(cfg)) return;
-    if (Date.now() - (cfg.lastAt || 0) < cfg.interval * 60000) return;
-    cfg.lastAt = Date.now();
-    saveReminder(cfg);
-    showReminderToast(cfg);
-    if (cfg.flash) flashTitle();
-  }
-
-  function showReminderToast(cfg) {
+  /** 到点提醒卡片 */
+  function showRecordReminder(rec, isTest) {
     const t = document.createElement('div');
     t.className = 'toast reminder-toast';
     t.innerHTML =
       '<div class="rt-icon"><svg width="17" height="17"><use href="#i-bell"/></svg></div>' +
       '<div class="rt-body">' +
-        '<div class="rt-title">刚才处理的问题，要不要记一笔？</div>' +
-        '<div class="rt-sub">距上次提醒已经 ' + intervalText(cfg.interval) +
-          '，趁还记得把现象和解决办法存下来</div>' +
+        '<div class="rt-title">' + (isTest ? '这是一条测试提醒' : '到提醒时间了') + '</div>' +
+        '<div class="rt-sub">' + (isTest ? '正式提醒会带上这条记录的信息' : '这条记录还等着你处理') + '</div>' +
+        '<div class="rt-target"><b>' + escapeHtml(rec.title || '未命名记录') + '</b>' +
+          (rec.customer ? '<span>' + escapeHtml(rec.customer) + '</span>' : '') +
+        '</div>' +
         '<div class="rt-actions">' +
-          '<button class="primary" data-rt="new">去登记</button>' +
-          '<button data-rt="later">稍后 15 分钟</button>' +
-          '<button data-rt="close">关掉</button>' +
+          '<button class="primary" data-rt="open">查看记录</button>' +
+          '<button data-rt="later">10 分钟后再提醒</button>' +
+          '<button data-rt="done">知道了</button>' +
         '</div>' +
       '</div>';
     el.toastWrap.appendChild(t);
 
-    t.addEventListener('click', (e) => {
+    if (isTest) {
+      setTimeout(() => {
+        if (t.isConnected) {
+          t.classList.add('leaving');
+          setTimeout(() => t.remove(), 240);
+        }
+      }, 8000);
+      return;
+    }
+
+    t.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-rt]');
       if (!btn) return;
       const act = btn.dataset.rt;
       t.remove();
-      if (act === 'new') {
-        if (state.view !== 'editor') openEditor();
+      if (act === 'open') {
+        if (state.view !== 'library') setView('library');
+        openDrawer(rec.id);
       } else if (act === 'later') {
-        const c = getReminder();
-        c.lastAt = Date.now() - (c.interval * 60000) + 15 * 60000;
-        saveReminder(c);
-        toast('好，15 分钟后再提醒你');
+        const fresh = await DB.getRecord(rec.id);
+        if (fresh) {
+          fresh.remindAt = toLocalInput(Date.now() + 10 * 60000);
+          fresh.remindDone = false;
+          await DB.saveRecord(fresh);
+        }
+        shownReminders.delete(rec.id);
+        await reload();
+        toast('好，10 分钟后再提醒你');
+      } else if (act === 'done') {
+        const fresh = await DB.getRecord(rec.id);
+        if (fresh) {
+          fresh.remindDone = true;
+          await DB.saveRecord(fresh);
+        }
+        shownReminders.delete(rec.id);
+        await reload();
+        toast('已处理这条提醒');
       }
     });
 
-    // 放着不动 25 秒自动收起
     setTimeout(() => {
       if (t.isConnected) {
         t.classList.add('leaving');
         setTimeout(() => t.remove(), 240);
       }
-    }, 25000);
+    }, 30000);
+  }
+
+  function systemNotify(rec) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const n = new Notification('问题手册 · 定时提醒', {
+        body: (rec.title || '未命名记录') + (rec.customer ? '（' + rec.customer + '）' : ''),
+        tag: 'vault-' + rec.id
+      });
+      n.onclick = () => {
+        window.focus();
+        n.close();
+        if (state.view !== 'library') setView('library');
+        openDrawer(rec.id);
+      };
+    } catch (e) { /* ignore */ }
   }
 
   let titleTimer = null;
@@ -1345,7 +1458,7 @@
     let on = false;
     let n = 0;
     titleTimer = setInterval(() => {
-      document.title = on ? ('⏰ 该登记了 · ' + titleOriginal) : titleOriginal;
+      document.title = on ? ('⏰ 有提醒 · ' + titleOriginal) : titleOriginal;
       on = !on;
       if (++n > 14) stopTitleFlash();
     }, 900);
@@ -1919,42 +2032,73 @@
   };
   $('#btnTheme').onclick = toggleTheme;
 
-  // 登记提醒
+  // 定时提醒
   el.btnReminder.onclick = () => {
+    const due = dueReminders();
+    if (due.length) {
+      // 重新弹一遍已有的到点提醒
+      due.forEach((r) => shownReminders.delete(r.id));
+      checkRecordReminders();
+      return;
+    }
     setView('settings');
     setTimeout(() => {
       const card = $('#cardReminder');
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 160);
   };
-  el.reminderSwitch.onchange = () => {
-    const cfg = getReminder();
-    cfg.enabled = el.reminderSwitch.checked;
-    if (cfg.enabled) cfg.lastAt = Date.now();
-    saveReminder(cfg);
-    if (cfg.enabled) toast('已开启，' + intervalText(cfg.interval) + '后开始提醒');
-  };
-  el.reminderInterval.onchange = () => {
-    const c = getReminder();
-    c.interval = +el.reminderInterval.value || 60;
-    c.lastAt = Date.now();
-    saveReminder(c);
-  };
-  el.reminderStart.onchange = () => {
-    const c = getReminder();
-    c.start = el.reminderStart.value || '09:00';
-    saveReminder(c);
-  };
-  el.reminderEnd.onchange = () => {
-    const c = getReminder();
-    c.end = el.reminderEnd.value || '18:00';
-    saveReminder(c);
-  };
-  el.reminderFlash.onchange = () => {
-    const c = getReminder();
-    c.flash = el.reminderFlash.checked;
-    saveReminder(c);
-  };
+
+  // 提醒时间快捷按钮
+  if (el.quickRemind) {
+    el.quickRemind.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-remind]');
+      if (!btn) return;
+      const kind = btn.dataset.remind;
+      let d = new Date();
+      if (kind === '1h') {
+        d = new Date(Date.now() + 3600000);
+      } else if (kind === 'tonight') {
+        d.setHours(20, 0, 0, 0);
+        if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+      } else if (kind === 'tomorrow') {
+        d.setDate(d.getDate() + 1);
+        d.setHours(9, 0, 0, 0);
+      }
+      el.fRemindAt.value = toLocalInput(d.getTime());
+    });
+  }
+
+  // 桌面通知开关
+  if (el.notifySwitch) {
+    el.notifySwitch.onchange = async () => {
+      if (el.notifySwitch.checked) {
+        const ok = await requestNotifyPermission();
+        if (!ok) {
+          el.notifySwitch.checked = false;
+          setNotifyEnabled(false);
+          return;
+        }
+        setNotifyEnabled(true);
+        toast('已开启，提醒时会弹出系统通知');
+      } else {
+        setNotifyEnabled(false);
+      }
+    };
+  }
+
+  // 测试提醒效果
+  if (el.btnTestRemind) {
+    el.btnTestRemind.onclick = async () => {
+      const fake = { id: 'test', title: '测试记录：打印机驱动冲突', customer: '星悦城电玩城' };
+      showRecordReminder(fake, true);
+      if (notifyEnabled()) {
+        const ok = await requestNotifyPermission();
+        if (ok) systemNotify(fake);
+        else toast('桌面通知没能开启，只显示了页面提醒', 'err');
+      }
+      flashTitle();
+    };
+  }
 
   // 待跟进提示条
   if (el.btnViewPending) {
@@ -2136,7 +2280,7 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       stopTitleFlash();
-      setTimeout(checkReminder, 3000);
+      setTimeout(checkRecordReminders, 3000);
     }
   });
 
@@ -2166,7 +2310,7 @@
     el.filterStatus.value = '';
     el.sortBy.value = 'updated';
     resetForm();
-    renderReminderUI();
+    renderNotifyUI();
     startReminderLoop();
     renderLibrary();
     renderSettings();

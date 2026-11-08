@@ -554,13 +554,35 @@ mark{background:#fff2a8;color:inherit;padding:0 1px;border-radius:2px}
 .toast.ok svg{color:#4ade80}
 .toast.err svg{color:#f87171}
 
-/* ---- 登记提醒 ---- */
+/* ---- 定时提醒 ---- */
 .bell-btn{position:relative}
-.bell-btn.on{color:var(--primary)}
-.bell-dot{
-  position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;
-  background:var(--success);border:1.5px solid var(--surface);display:block;
+.bell-btn.has-due{color:var(--danger)}
+.bell-count{
+  position:absolute;top:0;right:-1px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;
+  border-radius:99px;background:var(--danger);color:#fff;font-style:normal;
+  font-size:9.5px;font-weight:700;line-height:16px;text-align:center;
+  box-shadow:0 0 0 1.5px var(--surface);
 }
+
+.quick-remind{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.quick-remind button{
+  border:1px dashed var(--border-strong);background:none;color:var(--text-3);
+  font-size:11px;padding:1px 7px;border-radius:5px;cursor:pointer;white-space:nowrap;
+  transition:border-color .15s,color .15s,background .15s;font-family:inherit;
+}
+.quick-remind button:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft)}
+
+.rc-remind{color:var(--warn)}
+.rc-remind.due{color:var(--danger);font-weight:600}
+.meta-remind{color:var(--warn)}
+.meta-remind.due{color:var(--danger);font-weight:600;background:var(--danger-soft)!important}
+
+.rt-target{
+  display:flex;flex-direction:column;gap:1px;margin-top:9px;padding:7px 9px;
+  background:var(--surface-2);border-radius:6px;border-left:2px solid var(--warn);
+}
+.rt-target b{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+.rt-target span{font-size:11px;color:var(--text-3)}
 .notice{
   display:flex;align-items:center;gap:9px;padding:10px 12px 10px 14px;
   margin-bottom:14px;border-radius:var(--r-md);

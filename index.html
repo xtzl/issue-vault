@@ -116,9 +116,9 @@
         <kbd class="search-kbd">Ctrl K</kbd>
       </div>
       <div class="topbar-actions">
-        <button class="icon-btn bell-btn" id="btnReminder" title="登记提醒" aria-label="登记提醒">
+        <button class="icon-btn bell-btn" id="btnReminder" title="定时提醒" aria-label="定时提醒">
           <svg width="19" height="19"><use href="#i-bell"/></svg>
-          <i class="bell-dot" id="bellDot" hidden></i>
+          <i class="bell-count" id="bellCount" hidden></i>
         </button>
         <button class="btn btn-ghost" id="btnExportTop" title="导出当前筛选结果">
           <svg width="16" height="16"><use href="#i-download"/></svg><span class="hide-sm">导出</span>
@@ -259,11 +259,20 @@
                     <option value="未解决">未解决</option>
                   </select>
                 </div>
-                <div class="field col-span-2">
-                  <label class="label" for="fTags">标签<span class="hint">回车添加，用于快速归类检索</span></label>
+                <div class="field">
+                  <label class="label" for="fRemindAt">提醒时间<span class="hint">到点提醒我</span></label>
+                  <input class="input" type="datetime-local" id="fRemindAt">
+                  <div class="quick-remind" id="quickRemind">
+                    <button type="button" data-remind="1h">1 小时后</button>
+                    <button type="button" data-remind="tonight">今晚 20:00</button>
+                    <button type="button" data-remind="tomorrow">明早 09:00</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label" for="fTags">标签<span class="hint">回车添加</span></label>
                   <div class="tag-input" id="tagBox">
                     <div class="tag-list" id="tagList"></div>
-                    <input id="fTags" class="tag-field" placeholder="输入后回车，如：退款 / 充值" maxlength="20">
+                    <input id="fTags" class="tag-field" placeholder="如：退款" maxlength="20">
                   </div>
                   <div class="suggest-tags" id="suggestTags"></div>
                 </div>
@@ -490,47 +499,27 @@
 
         <div class="card" id="cardReminder">
           <div class="card-head">
-            <div class="card-title">登记提醒</div>
-            <span class="card-note">页面开着时，到点提醒你记一笔</span>
+            <div class="card-title">提醒</div>
+            <span class="card-note">登记时设定时间，到点提醒你</span>
           </div>
           <div class="card-body">
+            <p class="para">在登记问题时填一个「提醒时间」，到点后页面会弹出提醒，铃铛上也会显示数量。<br>如果想让提醒更显眼（切到别的窗口也能看到），把下面的桌面通知打开。</p>
             <div class="row-between">
               <div>
-                <div class="row-title">开启定时提醒</div>
-                <div class="row-sub">在设定的工作时间段内，每隔一段时间提醒一次</div>
+                <div class="row-title">桌面通知</div>
+                <div class="row-sub" id="notifyStatus">开启后需要允许浏览器通知</div>
               </div>
               <label class="switch">
-                <input type="checkbox" id="reminderSwitch">
+                <input type="checkbox" id="notifySwitch">
                 <span class="switch-track"><i></i></span>
               </label>
             </div>
-            <div id="reminderOpts" hidden>
-              <div class="grid-2" style="margin-top:18px">
-                <div class="field" style="margin-bottom:0">
-                  <label class="label" for="reminderInterval">提醒间隔</label>
-                  <select class="select" id="reminderInterval">
-                    <option value="30">30 分钟</option>
-                    <option value="45">45 分钟</option>
-                    <option value="60">1 小时</option>
-                    <option value="90">1.5 小时</option>
-                    <option value="120">2 小时</option>
-                  </select>
-                </div>
-                <div class="field" style="margin-bottom:0">
-                  <label class="label">工作时间</label>
-                  <div class="time-range">
-                    <input class="input" type="time" id="reminderStart" value="09:00">
-                    <span>至</span>
-                    <input class="input" type="time" id="reminderEnd" value="18:00">
-                  </div>
-                </div>
-              </div>
-              <label class="check reminder-flash">
-                <input type="checkbox" id="reminderFlash" checked>
-                <span>同时让标签页标题闪烁（切到别的窗口时也能注意到）</span>
-              </label>
-              <p class="reminder-tip" id="reminderNext">—</p>
+            <div class="btn-row" style="margin-top:18px">
+              <button class="btn btn-ghost" id="btnTestRemind">
+                <svg width="15" height="15"><use href="#i-bell"/></svg>试一下提醒效果
+              </button>
             </div>
+            <p class="reminder-tip" id="reminderPending">当前没有待提醒的记录</p>
           </div>
         </div>
 
