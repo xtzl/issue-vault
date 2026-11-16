@@ -107,6 +107,10 @@ window.VaultSync = (function () {
   }
 
   function defaultServer() {
+    // 页面里可以用 window.VAULT_SYNC_SERVER 强制指定（离线包用它指回公司服务器）
+    var forced = String(window.VAULT_SYNC_SERVER || '').trim();
+    if (forced) return trimSlash(forced);
+
     // 从同步服务托管的页面打开时（端口 8765），默认就用当前地址
     var port = (location.port || '');
     if (port === '8765') return location.origin;

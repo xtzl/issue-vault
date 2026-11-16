@@ -403,12 +403,18 @@ window.VaultDB = (function () {
   /**
    * @param {object} backup 备份对象
    * @param {'merge'|'replace'} mode
+   *
+   * merge 模式安全约定：
+   * - 同 id 记录只在「备份里的 updatedAt 更新」时才写入，绝不用旧数据盖掉新数据
+   * - 已存在的图片直接跳过，不重复解码 base64
+   * - 不删除本地任何数据
    */
   async function importBackup(backup, mode) {
     if (!backup || backup.app !== 'issue-vault' || !Array.isArray(backup.records)) {
       throw new Error('不是有效的备份文件');
     }
     const db = await open();
+    const merging = mode !== 'replace';
 
     if (mode === 'replace') {
       const tx0 = db.transaction([STORE_REC, STORE_IMG, STORE_META], 'readwrite');
@@ -418,9 +424,22 @@ window.VaultDB = (function () {
       await txDone(tx0);
     }
 
-    // 图片
+    // 合并前先读一遍现有记录，用于比较 updatedAt
+    let existingMap = new Map();
+    if (merging) {
+      const txRead = db.transaction(STORE_REC, 'readonly');
+      const existing = (await req(txRead.objectStore(STORE_REC).getAll())) || [];
+      existing.forEach((r) => { if (r && r.id) existingMap.set(r.id, r); });
+    }
+
+    // ---- 图片：只补本地没有的 ----
     let imgCount = 0;
+    const txKeys = db.transaction(STORE_IMG, 'readonly');
+    const imgKeys = new Set((await req(txKeys.objectStore(STORE_IMG).getAllKeys())) || []);
+
     for (const im of backup.images || []) {
+      if (!im || !im.id) continue;
+      if (merging && imgKeys.has(im.id)) continue;
       try {
         const full = await dataURLToBlob(im.full);
         const thumb = im.thumb ? await dataURLToBlob(im.thumb) : full;
@@ -437,13 +456,26 @@ window.VaultDB = (function () {
       }
     }
 
-    // 记录
-    let recCount = 0;
+    // ---- 记录：批量写入，合并模式下取 updatedAt 较新的 ----
+    const toPut = [];
+    let skipped = 0;
     for (const r of backup.records) {
+      if (!r || !r.id) continue;
+      if (merging) {
+        const cur = existingMap.get(r.id);
+        if (cur && (cur.updatedAt || 0) > (r.updatedAt || 0)) {
+          skipped++;
+          continue;
+        }
+      }
+      toPut.push(r);
+    }
+
+    if (toPut.length) {
       const tx = db.transaction(STORE_REC, 'readwrite');
-      tx.objectStore(STORE_REC).put(r);
+      const store = tx.objectStore(STORE_REC);
+      toPut.forEach((r) => store.put(r));
       await txDone(tx);
-      recCount++;
     }
 
     // meta
@@ -454,7 +486,7 @@ window.VaultDB = (function () {
         }
       }
     }
-    return { recCount, imgCount };
+    return { recCount: toPut.length, imgCount, skipped };
   }
 
   async function wipeAll() {

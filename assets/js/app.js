@@ -2480,7 +2480,8 @@
         title: '恢复备份',
         text: '备份中有 <b>' + (data.records || []).length + '</b> 条记录、' +
           (data.images || []).length + ' 张图片。<br><br>' +
-          '选择「确定」会与现有数据<b>合并</b>（同一条记录会被覆盖）；想先清空再恢复，请取消后手动清空数据。',
+          '会与现有数据<b>合并</b>：本地没有的新增；同一条记录两边都有时，<b>保留更新时间较新的那个</b>。' +
+          '本地已有的数据不会被删除。',
         okText: '合并恢复'
       });
       if (!ok) return;
@@ -2488,7 +2489,8 @@
       await reload();
       await updateStorage();
       renderLibrary();
-      toast('恢复完成：' + res.recCount + ' 条记录、' + res.imgCount + ' 张图片');
+      toast('恢复完成：写入 ' + res.recCount + ' 条记录、' + res.imgCount + ' 张图片' +
+        (res.skipped ? '，跳过 ' + res.skipped + ' 条比本地更旧的' : ''));
     } catch (err) {
       console.error(err);
       toast('恢复失败：' + (err.message || ''), 'err');
