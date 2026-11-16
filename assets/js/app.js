@@ -2657,6 +2657,27 @@
     try {
       await DB.open();
       state.categories = await DB.getCategories();
+
+      // 局域网同步：先把服务器上的增量合并进本地，再渲染首屏
+      if (window.VaultSync) {
+        window.VaultSync.onRemoteChange = async function () {
+          try {
+            await reload();
+            if (state.view === 'library') renderLibrary();
+            if (state.view === 'stats') renderStats();
+            updateNavCount();
+            updateStorage();
+          } catch (e) {
+            console.warn('[sync] 刷新界面失败', e);
+          }
+        };
+        try {
+          await window.VaultSync.bootstrap();
+        } catch (e) {
+          console.warn('[sync] 启动同步失败', e);
+        }
+      }
+
       await reload();
       // 不在这里自动清理图片：若另一标签页正在编辑，未保存的图片会被误删
       requestPersist();
@@ -2678,6 +2699,18 @@
     // 稍后与备份文件对一次数据，避免拖慢首屏
     setTimeout(() => { initBackupSync().catch(() => { /* ignore */ }); }, 1500);
   }
+
+  // 给同步模块用：拉到远程更新后需要重新渲染
+  window.VaultApp = {
+    reload: reload,
+    renderLibrary: renderLibrary,
+    renderStats: renderStats,
+    renderSettings: renderSettings,
+    updateNavCount: updateNavCount,
+    updateStorage: updateStorage,
+    setView: setView,
+    getState: function () { return state; }
+  };
 
   document.addEventListener('DOMContentLoaded', init);
   if (document.readyState !== 'loading') init();
