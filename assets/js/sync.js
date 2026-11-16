@@ -110,6 +110,20 @@ window.VaultSync = (function () {
     return String(s || '').trim().replace(/\/+$/, '');
   }
 
+  /**
+   * 当前页面是不是就跑在服务器本机上？
+   * 判断依据：同步地址的 host 和当前页面的 host 一致。
+   * 是的话这个浏览器就是"数据源"，不该出现"推送到服务器"这类按钮（推给自己没意义）。
+   */
+  function isLocalServer() {
+    if (!st.server) return false;
+    try {
+      return new URL(st.server).host === location.host;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function defaultServer() {
     // 页面里可以用 window.VAULT_SYNC_SERVER 强制指定（离线包用它指回公司服务器）
     var forced = String(window.VAULT_SYNC_SERVER || '').trim();
@@ -942,6 +956,14 @@ window.VaultSync = (function () {
       + '.vup.done .vup-title{color:var(--success)}'
       + '.vup.err .vup-bar i{background:var(--danger)}'
       + '.vup.err .vup-title{color:var(--danger)}'
+      // ---- 服务器模式：不显示客户端那套同步按钮 ----
+      + '.vsync-server .vsync-input,.vsync-server .vsync-row{display:none}'
+      + '.vsync-srv{display:none;margin-top:8px}'
+      + '.vsync-server .vsync-srv{display:block}'
+      + '.vsync-srv-tip{font-size:11.5px;line-height:1.65;color:var(--text-3)}'
+      + '.vsync-srv-stat{margin-top:8px;padding:7px 9px;border-radius:var(--r-sm);'
+      + 'background:var(--surface-3);font-size:11.5px;line-height:1.7;color:var(--text-2)}'
+      + '.vsync-srv .vsync-btn{width:100%;margin-top:8px}'
       + '@media (max-width:640px){.vup{left:14px;right:14px;width:auto;bottom:74px}}';
     var s = document.createElement('style');
     s.id = 'vsync-style';
@@ -981,12 +1003,20 @@ window.VaultSync = (function () {
       + '  <div class="vsync-row">'
       + '    <button class="vsync-btn" id="vsyncGc" type="button">清理本地冗余图片</button>'
       + '  </div>'
+      + '  <div class="vsync-srv">'
+      + '    <div class="vsync-srv-tip">这台就是服务器，记录和图片都存在它硬盘上的 data 文件夹里。</div>'
+      + '    <div class="vsync-srv-stat" id="vsyncStat">正在统计…</div>'
+      + '    <button class="vsync-btn" id="vsyncGc2" type="button">清理本地缓存</button>'
+      + '  </div>'
       + '  <div class="vsync-msg" id="vsyncMsg"></div>'
       + '</div>';
 
     var foot = sidebar.querySelector('.sidebar-foot');
     if (foot) sidebar.insertBefore(box, foot);
     else sidebar.appendChild(box);
+
+    // 跑在服务器本机上就切成"数据源"形态
+    if (isLocalServer()) box.classList.add('vsync-server');
 
     el.box = box;
     el.head = document.getElementById('vsyncHead');
@@ -998,10 +1028,13 @@ window.VaultSync = (function () {
     el.toggle = document.getElementById('vsyncToggle');
     el.reset = document.getElementById('vsyncReset');
     el.gc = document.getElementById('vsyncGc');
+    el.gc2 = document.getElementById('vsyncGc2');
+    el.stat = document.getElementById('vsyncStat');
     el.msg = document.getElementById('vsyncMsg');
 
     el.head.addEventListener('click', function () {
       box.classList.toggle('open');
+      if (box.classList.contains('open') && isLocalServer()) updateServerStat();
     });
 
     el.server.addEventListener('change', function () {
@@ -1086,28 +1119,32 @@ window.VaultSync = (function () {
       });
     });
 
-    el.gc.addEventListener('click', async function () {
+    async function doGc(btn) {
       var ok = window.confirm(
-        '清理本机浏览器里「没有任何记录引用」的图片。\n\n' +
-        '· 不影响任何记录，也不影响服务器上的数据\n' +
-        '· 如果你正在别的标签页编辑一条还没保存的记录，那张图可能被清掉\n\n' +
+        '清理本机浏览器里「没有任何记录引用」的图片缓存。\n\n' +
+        '· 记录本身和服务器上的数据都不受影响\n' +
+        '· 如果你在别的标签页正编辑一条还没保存的记录，那张图可能被清掉\n\n' +
         '继续吗？'
       );
       if (!ok) return;
-      el.gc.disabled = true;
+      if (btn) btn.disabled = true;
       setMsg('正在清理…', '');
       try {
         var n = await DB.gcImages();
-        setMsg(n ? '已清理 ' + n + ' 张未被引用的图片，本地占用已释放' : '没有需要清理的图片', 'ok');
+        setMsg(n ? '已清理 ' + n + ' 张未被引用的图片' : '没有需要清理的图片', 'ok');
+        if (isLocalServer()) updateServerStat();
         if (typeof st.onRemoteChange === 'function') {
           try { await st.onRemoteChange(0); } catch (e) { /* ignore */ }
         }
       } catch (e) {
         setMsg('清理失败：' + e.message, 'err');
       } finally {
-        el.gc.disabled = false;
+        if (btn) btn.disabled = false;
       }
-    });
+    }
+
+    el.gc.addEventListener('click', function () { doGc(el.gc); });
+    if (el.gc2) el.gc2.addEventListener('click', function () { doGc(el.gc2); });
 
     st.mounted = true;
     render();
@@ -1126,7 +1163,11 @@ window.VaultSync = (function () {
     var label = '局域网同步';
     var timeText = '';
 
-    if (st.status === 'off') {
+    if (isLocalServer()) {
+      // 服务器本机：这里就是数据源头，不叫"同步"
+      label = st.status === 'error' ? '数据源 · 读取异常' : '数据源 · 本机';
+      timeText = st.status === 'error' ? '重试中' : relTime(st.lastPullAt);
+    } else if (st.status === 'off') {
       label = st.server ? '同步已关闭' : '同步未配置';
       timeText = st.server ? '' : '点此设置';
     } else if (st.status === 'syncing') {
@@ -1252,6 +1293,19 @@ window.VaultSync = (function () {
   function resetUpload() {
     st.upload = { phase: 'idle', total: 0, done: 0, message: '' };
     renderUpload();
+  }
+
+  /** 服务器模式下的统计（记录数/图片数/浏览器缓存占用） */
+  async function updateServerStat() {
+    if (!el.stat) return;
+    try {
+      var u = await DB.usage();
+      var mb = (u.bytes / 1048576).toFixed(1);
+      el.stat.innerHTML = '记录 <b>' + u.recordCount + '</b> 条 · 图片 <b>' +
+        u.imageCount + '</b> 张<br>浏览器缓存 ' + mb + ' MB';
+    } catch (e) {
+      el.stat.textContent = '统计失败';
+    }
   }
 
   /* ---------------------------------------------------------- 启动 */
