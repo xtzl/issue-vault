@@ -789,7 +789,8 @@ window.VaultSync = (function () {
 
   async function pushAll(onProgress) {
     if (!st.server) throw new Error('请先填写服务器地址');
-    var recs = await DB.allRecords();
+    var all = await DB.allRecords();
+    var recs = (all || []).filter(function (r) { return r && r.id && !r.deleted; });
     if (!recs.length) throw new Error('本地没有数据可推送');
 
     var BATCH = 40;
@@ -807,6 +808,11 @@ window.VaultSync = (function () {
     }
     st.since = 0;
     lsSet(K.since, '0');
+
+    // 记录推完，把缺失的图片也补上去（check 会挡掉服务端已有的，不会重复传）
+    st.silent = false;
+    queueImageUpload(recs.map(function (r) { return r.id; }));
+
     return { total: done };
   }
 
@@ -982,7 +988,7 @@ window.VaultSync = (function () {
         var r = await pushAll(function (done, total) {
           setMsg('已上传 ' + done + ' / ' + total + ' 条…', '');
         });
-        setMsg('已把 ' + r.total + ' 条推送到服务器', 'ok');
+        setMsg('已把 ' + r.total + ' 条推送到服务器，缺失的图片在后台继续传（看状态栏进度）', 'ok');
         // 推完再拉一次，把服务器上别处的更新带回来
         await syncNow({});
       } catch (e) {
