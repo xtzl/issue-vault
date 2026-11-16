@@ -53,6 +53,9 @@ window.VaultSync = (function () {
     pending: new Set(),   // 待推送的记录 id
     pendingDel: new Set(),// 待推送的删除 id
     imgs: new Set(),      // 已上传的图片 id
+    imgQueue: new Set(),  // 待上传图片的记录 id
+    imgTotal: 0,          // 本轮要传的图片张数
+    imgDone: 0,           // 本轮已传张数
     pushTimer: null,
     pollTimer: null,
     busy: false,
@@ -284,39 +287,95 @@ window.VaultSync = (function () {
 
   /* ---------------------------------------------------------- 推送 */
 
+  /** 二进制直传一张图，比 base64 省 1/3 流量，也不吃 CPU */
+  function uploadBlob(iid, blob, mime) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 60000);
+    var init = {
+      method: 'POST',
+      headers: { 'Content-Type': mime || 'image/jpeg' },
+      body: blob
+    };
+    if (ctrl) init.signal = ctrl.signal;
+    return fetch(st.server + '/api/images/' + encodeURIComponent(iid), init).then(function (res) {
+      clearTimeout(timer);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }, function (err) {
+      clearTimeout(timer);
+      throw err;
+    });
+  }
+
+  /**
+   * 把一条记录引用的图片传到服务端。
+   * 关键：先问服务端 /api/images/check 哪些已经有了，只传缺的。
+   * 不能只靠本地集合——多标签页、换浏览器、清缓存都会让它失真。
+   */
   async function uploadImagesOf(rec) {
     if (!st.enabled || !st.server) return true;
     var ids = []
       .concat(rec.problemImages || [], rec.solutionImages || [])
       .filter(Boolean);
+    if (!ids.length) return true;
 
-    for (var i = 0; i < ids.length; i++) {
-      var iid = ids[i];
-      if (st.imgs.has(iid)) continue;
-      try {
-        var im = await DB.getImage(iid);
-        if (!im || !im.full) continue;
-        var dataUrl = await blobToDataURL(im.full);
-        await api('/api/images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: iid,
-            data: dataUrl,
-            type: im.type || 'image/jpeg',
-            name: im.name || ''
-          }),
-          timeout: 60000
-        });
-        st.imgs.add(iid);
-        persistImgs();
-      } catch (e) {
-        // 图片失败不阻断记录同步，下次保存会再试
-        console.warn('[sync] 图片上传失败', iid, e.message);
-        return false;
+    // 本地已知传过的先剔掉
+    var todo = ids.filter(function (i) { return !st.imgs.has(i); });
+    if (!todo.length) return true;
+
+    // 问服务端：这些里面哪些已经有了
+    try {
+      var resp = await api('/api/images/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: todo })
+      });
+      var have = (resp && resp.have) || [];
+      have.forEach(function (i) { st.imgs.add(i); });
+      if (have.length) persistImgs();
+      todo = todo.filter(function (i) { return have.indexOf(i) < 0; });
+    } catch (e) {
+      console.warn('[sync] 查询已有图片失败，按本地判断继续', e.message);
+    }
+
+    if (!todo.length) return true;
+
+    // 剩下的并发上传，一次 4 张
+    var CONC = 4;
+    var cursor = 0;
+    var failed = false;
+    st.imgTotal = (st.imgTotal || 0) + todo.length;
+
+    async function worker() {
+      while (cursor < todo.length) {
+        if (!st.enabled || !st.server || failed) return;
+        var iid = todo[cursor++];
+        try {
+          var im = await DB.getImage(iid);
+          if (!im || !im.full) {
+            // 本地没这张图，标记一下别再反复查
+            st.imgs.add(iid);
+            continue;
+          }
+          await uploadBlob(iid, im.full, im.type);
+          st.imgs.add(iid);
+          st.imgDone = (st.imgDone || 0) + 1;
+          if (st.imgDone % 10 === 0) render();
+        } catch (e) {
+          console.warn('[sync] 图片上传失败', iid, e.message);
+          failed = true;
+          return;
+        }
       }
     }
-    return true;
+
+    var workers = [];
+    var n = Math.min(CONC, todo.length);
+    for (var w = 0; w < n; w++) workers.push(worker());
+    await Promise.all(workers);
+
+    persistImgs();
+    return !failed;
   }
 
   async function pushRecord(id) {
@@ -343,6 +402,7 @@ window.VaultSync = (function () {
     if (!st.pending.size && !st.pendingDel.size) return { ok: true, pushed: 0 };
 
     var pushed = 0;
+    var pushedIds = [];
     var puts = Array.from(st.pending);
     var dels = Array.from(st.pendingDel);
     if (!puts.length && !dels.length) return { ok: true, pushed: 0 };
@@ -375,7 +435,10 @@ window.VaultSync = (function () {
             body: JSON.stringify({ records: chunk }),
             timeout: 60000
           });
-          chunk.forEach(function (x) { st.pending.delete(x.id); });
+          chunk.forEach(function (x) {
+            st.pending.delete(x.id);
+            pushedIds.push(x.id);
+          });
           persistPending();
           pushed += chunk.length;
         } catch (e) {
@@ -402,8 +465,8 @@ window.VaultSync = (function () {
 
     persistPending();
 
-    // ---- 3. 图片后台慢慢传，不拖慢记录同步 ----
-    if (pushed) queueImageUpload();
+    // ---- 3. 只给刚推上去的这些记录补图片，不再遍历全库 ----
+    if (pushedIds.length) queueImageUpload(pushedIds);
 
     return { ok: true, pushed: pushed };
   }
@@ -572,30 +635,40 @@ window.VaultSync = (function () {
   var imgUpTimer = null;
   var imgUping = false;
 
-  function queueImageUpload() {
+  /**
+   * 只上传「刚推送过的那些记录」的图片，不再每次遍历全库。
+   * 记录 id 进队列后合并处理，2 秒防抖。
+   */
+  function queueImageUpload(recordIds) {
     if (!st.enabled || !st.server) return;
+    if (!st.imgQueue) st.imgQueue = new Set();
+    if (recordIds && recordIds.length) {
+      recordIds.forEach(function (i) { st.imgQueue.add(String(i)); });
+    }
+    if (st.imgQueue.size === 0) return;
     if (imgUping || imgUpTimer) return;
+
     imgUpTimer = setTimeout(async function () {
       imgUpTimer = null;
       if (imgUping) return;
       imgUping = true;
       var fails = 0;
       try {
-        var recs = await DB.allRecords();
-        for (var i = 0; i < recs.length; i++) {
-          if (!st.enabled || !st.server) break;
-          var r = recs[i];
-          var ids = (r.problemImages || []).concat(r.solutionImages || []);
-          if (!ids.length) continue;
-
-          var ok = await uploadImagesOf(r);
-          if (ok) {
-            fails = 0;
-          } else {
-            fails++;
-            if (fails >= 3) {
-              console.warn('[sync] 连续上传失败，暂停图片上传');
-              break;
+        while (st.imgQueue.size) {
+          var batch = Array.from(st.imgQueue);
+          st.imgQueue.clear();
+          for (var i = 0; i < batch.length; i++) {
+            if (!st.enabled || !st.server) return;
+            var rec = await DB.getRecord(batch[i]);
+            if (!rec) continue;
+            var ok = await uploadImagesOf(rec);
+            if (!ok) {
+              fails++;
+              st.imgQueue.add(batch[i]);
+              if (fails >= 3) {
+                console.warn('[sync] 图片上传连续失败，暂停本轮');
+                return;
+              }
             }
           }
         }
@@ -603,6 +676,8 @@ window.VaultSync = (function () {
         console.warn('[sync] 图片上传中断', e.message);
       } finally {
         imgUping = false;
+        st.imgTotal = 0;
+        render();
       }
     }, 2000);
   }
@@ -947,6 +1022,12 @@ window.VaultSync = (function () {
 
     el.label.textContent = label;
     el.time.textContent = timeText;
+
+    // 图片批量上传时把进度显示出来，别让人以为卡住了
+    if (st.imgTotal > 0) {
+      el.label.textContent = '正在传图片';
+      el.time.textContent = st.imgDone + '/' + st.imgTotal;
+    }
     if (document.activeElement !== el.server) {
       el.server.value = st.server;
       // 长地址默认滚到末尾会看不到 http:// ，强行回左
