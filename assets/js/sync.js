@@ -762,7 +762,7 @@ window.VaultSync = (function () {
       + '.vsync-time{margin-left:auto;font-size:11px;color:var(--text-3)}'
       + '.vsync-body{padding:0 10px 10px;display:none}'
       + '.vsync.open .vsync-body{display:block}'
-      + '.vsync-row{display:flex;gap:6px;margin-top:8px}'
+      + '.vsync-row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}'
       + '.vsync-input{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font:inherit;font-size:11.5px}'
       + '.vsync-btn{padding:6px 9px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}'
       + '.vsync-btn:hover{background:var(--surface-3)}'
@@ -805,7 +805,7 @@ window.VaultSync = (function () {
       + '  </div>'
       + '  <div class="vsync-row">'
       + '    <button class="vsync-btn" id="vsyncToggle" type="button">关闭同步</button>'
-      + '    <button class="vsync-btn" id="vsyncReset" type="button">重置进度</button>'
+      + '    <button class="vsync-btn" id="vsyncReset" type="button">重新全量同步</button>'
       + '  </div>'
       + '  <div class="vsync-msg" id="vsyncMsg"></div>'
       + '</div>';
@@ -893,10 +893,22 @@ window.VaultSync = (function () {
     });
 
     el.reset.addEventListener('click', function () {
+      var ok = window.confirm(
+        '把服务器上的数据从头重新拉一遍（排查数据不齐时用）。\n\n' +
+        '· 不会删除本机任何记录\n' +
+        '· 记录多的话这次同步会慢一点\n\n' +
+        '确定要重新全量同步吗？'
+      );
+      if (!ok) return;
       st.since = 0;
       lsSet(K.since, '0');
       st.silent = false;
-      setMsg('已重置同步进度，下次同步会全量拉取', 'ok');
+      setMsg('已重置。下次同步会把服务器数据重新拉一遍，本机记录不受影响。', 'ok');
+      syncNow({}).then(function (r) {
+        setMsg('全量同步完成：上行 ' + (r.pushed || 0) + ' 条，下行 ' + (r.changed || 0) + ' 条', 'ok');
+      }).catch(function (e) {
+        setMsg(e.message, 'err');
+      });
     });
 
     st.mounted = true;
