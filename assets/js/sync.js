@@ -929,6 +929,23 @@ window.VaultSync = (function () {
         return v;
       };
     });
+
+    // 清空全部数据：清之前先把 id 记下来，清完把删除推到服务器。
+    // 否则只清了本地缓存，下次同步又从服务器拉回来，看着像"清空失败"。
+    var origWipe = DB.wipeAll;
+    if (typeof origWipe === 'function') {
+      DB.wipeAll = async function () {
+        var recs = await DB.allRecords();
+        var ids = (recs || []).map(function (r) { return r.id; }).filter(Boolean);
+        var v = await origWipe.apply(this, arguments);
+        if (ids.length) {
+          ids.forEach(function (id) { st.pendingDel.add(String(id)); });
+          persistPending();
+          scheduleFlush(800);
+        }
+        return v;
+      };
+    }
   }
 
   /* ---------------------------------------------------------- 界面 */
