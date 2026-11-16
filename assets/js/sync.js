@@ -730,6 +730,8 @@ window.VaultSync = (function () {
     el.time.textContent = timeText;
     if (document.activeElement !== el.server) {
       el.server.value = st.server;
+      // 长地址默认滚到末尾会看不到 http:// ，强行回左
+      el.server.scrollLeft = 0;
     }
     el.toggle.textContent = st.enabled ? '关闭同步' : '开启同步';
     el.now.disabled = !st.enabled || !st.server;
