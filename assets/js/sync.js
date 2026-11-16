@@ -124,6 +124,26 @@ window.VaultSync = (function () {
     }
   }
 
+  /** 侧边栏底部那个版本文案，换成网页代码的真实更新时间 */
+  async function updateVersionBadge() {
+    var badge = document.querySelector('.sidebar-foot .ver');
+    if (!badge || !st.server) return;
+    try {
+      var res = await fetch(st.server + '/api/app/manifest', { cache: 'no-store' });
+      if (!res.ok) return;
+      var j = await res.json();
+      var mtime = parseInt(String(j.version || '').split('-')[0], 10);
+      if (!mtime) return;
+      var d = new Date(mtime);
+      var p = function (n) { return n < 10 ? '0' + n : String(n); };
+      badge.textContent = (d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+        p(d.getHours()) + ':' + p(d.getMinutes());
+      badge.title = '网页代码最后更新时间：' + d.toLocaleString('zh-CN');
+    } catch (e) {
+      // 拿不到就保持原样，不影响使用
+    }
+  }
+
   function defaultServer() {
     // 页面里可以用 window.VAULT_SYNC_SERVER 强制指定（离线包用它指回公司服务器）
     var forced = String(window.VAULT_SYNC_SERVER || '').trim();
@@ -964,6 +984,9 @@ window.VaultSync = (function () {
       + '.vsync-srv-stat{margin-top:8px;padding:7px 9px;border-radius:var(--r-sm);'
       + 'background:var(--surface-3);font-size:11.5px;line-height:1.7;color:var(--text-2)}'
       + '.vsync-srv .vsync-btn{width:100%;margin-top:8px}'
+      + '.vsync-srv-addr{margin-top:9px;padding:6px 8px;border-radius:var(--r-sm);'
+      + 'background:var(--surface);border:1px solid var(--border);font-size:11px;'
+      + 'color:var(--text-3);font-family:var(--mono);word-break:break-all;text-align:center}'
       + '@media (max-width:640px){.vup{left:14px;right:14px;width:auto;bottom:74px}}';
     var s = document.createElement('style');
     s.id = 'vsync-style';
@@ -1005,6 +1028,7 @@ window.VaultSync = (function () {
       + '  </div>'
       + '  <div class="vsync-srv">'
       + '    <div class="vsync-srv-tip">这台就是服务器，记录和图片都存在它硬盘上的 data 文件夹里。</div>'
+      + '    <div class="vsync-srv-addr" id="vsyncSrvAddr">—</div>'
       + '    <div class="vsync-srv-stat" id="vsyncStat">正在统计…</div>'
       + '    <button class="vsync-btn" id="vsyncGc2" type="button">清理本地缓存</button>'
       + '  </div>'
@@ -1016,7 +1040,11 @@ window.VaultSync = (function () {
     else sidebar.appendChild(box);
 
     // 跑在服务器本机上就切成"数据源"形态
-    if (isLocalServer()) box.classList.add('vsync-server');
+    if (isLocalServer()) {
+      box.classList.add('vsync-server');
+      var addrEl = document.getElementById('vsyncSrvAddr');
+      if (addrEl) addrEl.textContent = location.origin;
+    }
 
     el.box = box;
     el.head = document.getElementById('vsyncHead');
@@ -1299,10 +1327,24 @@ window.VaultSync = (function () {
   async function updateServerStat() {
     if (!el.stat) return;
     try {
-      var u = await DB.usage();
-      var mb = (u.bytes / 1048576).toFixed(1);
-      el.stat.innerHTML = '记录 <b>' + u.recordCount + '</b> 条 · 图片 <b>' +
-        u.imageCount + '</b> 张<br>浏览器缓存 ' + mb + ' MB';
+      var db = await DB.open();
+
+      // 只数 key，不读 Blob，几百张图也是瞬间
+      var txR = db.transaction('records', 'readonly');
+      var recKeys = (await req(txR.objectStore('records').getAllKeys())) || [];
+      var txI = db.transaction('images', 'readonly');
+      var imgKeys = (await req(txI.objectStore('images').getAllKeys())) || [];
+
+      var mb = 0;
+      try {
+        if (navigator.storage && navigator.storage.estimate) {
+          var est = await navigator.storage.estimate();
+          mb = (est.usage || 0) / 1048576;
+        }
+      } catch (e) { /* 拿不到就不显示 */ }
+
+      el.stat.innerHTML = '记录 <b>' + recKeys.length + '</b> 条 · 图片 <b>' +
+        imgKeys.length + '</b> 张<br>浏览器缓存 ' + mb.toFixed(1) + ' MB';
     } catch (e) {
       el.stat.textContent = '统计失败';
     }
@@ -1329,6 +1371,7 @@ window.VaultSync = (function () {
     st.silent = false;
     startPoll();
     render();
+    updateVersionBadge();
 
     // 后台同步，绝不阻塞首屏
     syncNow({ quiet: true }).catch(function (e) {
