@@ -223,7 +223,12 @@ window.VaultSync = (function () {
 
     var toPut = [];
     var toDel = [];
+    var candidates = new Set(); // 可能变成孤儿的图片 id
     var n = 0;
+
+    function imgsOf(rec) {
+      return [].concat(rec.problemImages || [], rec.solutionImages || []).filter(Boolean);
+    }
 
     list.forEach(function (r) {
       if (!r || !r.id) return;
@@ -231,7 +236,10 @@ window.VaultSync = (function () {
 
       if (r.deleted) {
         // 服务端墓碑：本地有就删掉，并记下不复活
-        if (cur) toDel.push(r.id);
+        if (cur) {
+          toDel.push(r.id);
+          imgsOf(cur).forEach(function (i) { candidates.add(i); });
+        }
         return;
       }
       if (!cur) {
@@ -242,6 +250,9 @@ window.VaultSync = (function () {
       if ((r.updatedAt || 0) > (cur.updatedAt || 0)) {
         toPut.push(r);
         n++;
+        // 旧版本有、新版本没有的图，可能是孤儿
+        var keep = new Set(imgsOf(r));
+        imgsOf(cur).forEach(function (i) { if (!keep.has(i)) candidates.add(i); });
       }
     });
 
@@ -259,6 +270,29 @@ window.VaultSync = (function () {
       toDel.forEach(function (id) { store2.delete(id); });
       await txDone(tx2);
     }
+
+    // 关键：删完记录后把不再被引用的图片一起删掉。
+    // 以前漏了这步，别处删掉的记录，图片会永远留在这台机器上，本地占用只涨不降。
+    if (candidates.size) {
+      try {
+        var remain = await DB.allRecords();
+        var used = new Set();
+        remain.forEach(function (r) {
+          imgsOf(r).forEach(function (i) { used.add(i); });
+        });
+        var orphans = Array.from(candidates).filter(function (i) { return !used.has(i); });
+        if (orphans.length) {
+          var tx3 = db.transaction('images', 'readwrite');
+          var s3 = tx3.objectStore('images');
+          orphans.forEach(function (i) { s3.delete(i); });
+          await txDone(tx3);
+          console.log('[sync] 清理孤儿图片 ' + orphans.length + ' 张');
+        }
+      } catch (e) {
+        console.warn('[sync] 清理孤儿图片失败', e.message);
+      }
+    }
+
     return n;
   }
 
@@ -882,6 +916,9 @@ window.VaultSync = (function () {
       + '    <button class="vsync-btn" id="vsyncToggle" type="button">关闭同步</button>'
       + '    <button class="vsync-btn" id="vsyncReset" type="button">重新全量同步</button>'
       + '  </div>'
+      + '  <div class="vsync-row">'
+      + '    <button class="vsync-btn" id="vsyncGc" type="button">清理本地冗余图片</button>'
+      + '  </div>'
       + '  <div class="vsync-msg" id="vsyncMsg"></div>'
       + '</div>';
 
@@ -898,6 +935,7 @@ window.VaultSync = (function () {
     el.all = document.getElementById('vsyncAll');
     el.toggle = document.getElementById('vsyncToggle');
     el.reset = document.getElementById('vsyncReset');
+    el.gc = document.getElementById('vsyncGc');
     el.msg = document.getElementById('vsyncMsg');
 
     el.head.addEventListener('click', function () {
@@ -984,6 +1022,29 @@ window.VaultSync = (function () {
       }).catch(function (e) {
         setMsg(e.message, 'err');
       });
+    });
+
+    el.gc.addEventListener('click', async function () {
+      var ok = window.confirm(
+        '清理本机浏览器里「没有任何记录引用」的图片。\n\n' +
+        '· 不影响任何记录，也不影响服务器上的数据\n' +
+        '· 如果你正在别的标签页编辑一条还没保存的记录，那张图可能被清掉\n\n' +
+        '继续吗？'
+      );
+      if (!ok) return;
+      el.gc.disabled = true;
+      setMsg('正在清理…', '');
+      try {
+        var n = await DB.gcImages();
+        setMsg(n ? '已清理 ' + n + ' 张未被引用的图片，本地占用已释放' : '没有需要清理的图片', 'ok');
+        if (typeof st.onRemoteChange === 'function') {
+          try { await st.onRemoteChange(0); } catch (e) { /* ignore */ }
+        }
+      } catch (e) {
+        setMsg('清理失败：' + e.message, 'err');
+      } finally {
+        el.gc.disabled = false;
+      }
     });
 
     st.mounted = true;
