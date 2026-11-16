@@ -2660,7 +2660,13 @@
       await DB.open();
       state.categories = await DB.getCategories();
 
-      // 局域网同步：先把服务器上的增量合并进本地，再渲染首屏
+      // 先用本地缓存把首屏画出来，不等网络。
+      // 笔记本是主力机，服务器偶尔慢/连不上时也必须能立刻打开干活。
+      await reload();
+      // 不在这里自动清理图片：若另一标签页正在编辑，未保存的图片会被误删
+      requestPersist();
+
+      // 同步完全放后台：拉到新数据后通过 onRemoteChange 刷新界面
       if (window.VaultSync) {
         window.VaultSync.onRemoteChange = async function () {
           try {
@@ -2673,16 +2679,10 @@
             console.warn('[sync] 刷新界面失败', e);
           }
         };
-        try {
-          await window.VaultSync.bootstrap();
-        } catch (e) {
+        window.VaultSync.bootstrap().catch(function (e) {
           console.warn('[sync] 启动同步失败', e);
-        }
+        });
       }
-
-      await reload();
-      // 不在这里自动清理图片：若另一标签页正在编辑，未保存的图片会被误删
-      requestPersist();
     } catch (e) {
       console.error(e);
       toast('数据库初始化失败：' + (e.message || '') + '（请勿直接双击打开 HTML）', 'err');

@@ -285,7 +285,7 @@ window.VaultSync = (function () {
   /* ---------------------------------------------------------- 推送 */
 
   async function uploadImagesOf(rec) {
-    if (!st.enabled || !st.server) return;
+    if (!st.enabled || !st.server) return true;
     var ids = []
       .concat(rec.problemImages || [], rec.solutionImages || [])
       .filter(Boolean);
@@ -313,9 +313,10 @@ window.VaultSync = (function () {
       } catch (e) {
         // 图片失败不阻断记录同步，下次保存会再试
         console.warn('[sync] 图片上传失败', iid, e.message);
-        break;
+        return false;
       }
     }
+    return true;
   }
 
   async function pushRecord(id) {
@@ -343,22 +344,51 @@ window.VaultSync = (function () {
 
     var pushed = 0;
     var puts = Array.from(st.pending);
-    for (var i = 0; i < puts.length; i++) {
-      var id = puts[i];
-      st.pending.delete(id);
-      try {
-        await pushRecord(id);
-        pushed++;
-      } catch (e) {
-        st.pending.add(id);
-        persistPending();
-        throw e;
+    var dels = Array.from(st.pendingDel);
+    if (!puts.length && !dels.length) return { ok: true, pushed: 0 };
+
+    // ---- 1. 记录走批量接口：一次 50 条，比逐条 PUT 快几十倍 ----
+    if (puts.length) {
+      var recs = [];
+      for (var i = 0; i < puts.length; i++) {
+        var id = puts[i];
+        try {
+          var r = await DB.getRecord(id);
+          if (r) recs.push(r);
+          else {
+            // 本地已经删了，转成删除任务
+            st.pending.delete(id);
+            st.pendingDel.add(id);
+          }
+        } catch (e) {
+          // 单条读失败就跳过，留在队列里下次再试
+        }
+      }
+
+      var BATCH = 50;
+      for (var j = 0; j < recs.length; j += BATCH) {
+        var chunk = recs.slice(j, j + BATCH);
+        try {
+          await api('/api/records/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: chunk }),
+            timeout: 60000
+          });
+          chunk.forEach(function (x) { st.pending.delete(x.id); });
+          persistPending();
+          pushed += chunk.length;
+        } catch (e) {
+          persistPending();
+          throw e;
+        }
       }
     }
 
-    var dels = Array.from(st.pendingDel);
-    for (var j = 0; j < dels.length; j++) {
-      var did = dels[j];
+    // ---- 2. 删除（服务端软删，逐条即可）----
+    var dels2 = Array.from(st.pendingDel);
+    for (var k = 0; k < dels2.length; k++) {
+      var did = dels2[k];
       st.pendingDel.delete(did);
       try {
         await pushDelete(did);
@@ -371,6 +401,10 @@ window.VaultSync = (function () {
     }
 
     persistPending();
+
+    // ---- 3. 图片后台慢慢传，不拖慢记录同步 ----
+    if (pushed) queueImageUpload();
+
     return { ok: true, pushed: pushed };
   }
 
@@ -407,6 +441,172 @@ window.VaultSync = (function () {
     }, typeof delay === 'number' ? delay : DEBOUNCE_MS);
   }
 
+  /* ---------------------------------------------------------- 图片补齐 */
+  // 记录同步只带图片 id，图片本体在服务端 /api/images/:id。
+  // 换一台电脑首次打开时本地没有图，这里后台悄悄补下来，不挡首屏。
+
+  var imgFillTimer = null;
+  var imgFilling = false;
+
+  function req(r) {
+    return new Promise(function (resolve, reject) {
+      r.onsuccess = function () { resolve(r.result); };
+      r.onerror = function () { reject(r.error); };
+    });
+  }
+
+  function makeThumb(blob, maxDim) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        try {
+          var w = img.naturalWidth || img.width;
+          var h = img.naturalHeight || img.height;
+          var scale = Math.min(1, maxDim / Math.max(w, h));
+          w = Math.max(1, Math.round(w * scale));
+          h = Math.max(1, Math.round(h * scale));
+          var c = document.createElement('canvas');
+          c.width = w;
+          c.height = h;
+          var ctx = c.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          c.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.74);
+        } catch (e) {
+          resolve(null);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    });
+  }
+
+  async function fillImages(records) {
+    var ids = [];
+    (records || []).forEach(function (r) {
+      (r.problemImages || []).forEach(function (i) { if (i) ids.push(i); });
+      (r.solutionImages || []).forEach(function (i) { if (i) ids.push(i); });
+    });
+    if (!ids.length) return 0;
+    ids = Array.from(new Set(ids));
+
+    var db = await DB.open();
+    var tx = db.transaction('images', 'readonly');
+    var have = new Set((await req(tx.objectStore('images').getAllKeys())) || []);
+
+    var todo = ids.filter(function (i) { return !have.has(i); });
+    if (!todo.length) return 0;
+
+    var done = 0;
+    for (var i = 0; i < todo.length; i++) {
+      if (!st.enabled || !st.server) break;
+      try {
+        var res = await fetch(st.server + '/api/images/' + encodeURIComponent(todo[i]));
+        if (!res.ok) continue;
+        var blob = await res.blob();
+        if (!blob.size) continue;
+
+        var thumb = await makeThumb(blob, 360);
+        var w = 0;
+        var h = 0;
+        try {
+          var bmp = await createImageBitmap(blob);
+          w = bmp.width;
+          h = bmp.height;
+          if (bmp.close) bmp.close();
+        } catch (e) { /* 拿不到尺寸不影响使用 */ }
+
+        var tx2 = db.transaction('images', 'readwrite');
+        tx2.objectStore('images').put({
+          id: todo[i],
+          full: blob,
+          thumb: thumb || blob,
+          w: w,
+          h: h,
+          size: blob.size,
+          thumbSize: (thumb || blob).size,
+          type: blob.type || 'image/jpeg',
+          name: '',
+          createdAt: Date.now()
+        });
+        await txDone(tx2);
+        done++;
+      } catch (e) {
+        console.warn('[sync] 补图失败', todo[i], e.message);
+        break;
+      }
+    }
+    return done;
+  }
+
+  function queueImageFill() {
+    if (!st.enabled || !st.server) return;
+    if (imgFilling || imgFillTimer) return;
+    imgFillTimer = setTimeout(async function () {
+      imgFillTimer = null;
+      if (imgFilling) return;
+      imgFilling = true;
+      try {
+        var recs = await DB.allRecords();
+        var n = await fillImages(recs);
+        if (n && !st.silent && typeof st.onRemoteChange === 'function') {
+          try { await st.onRemoteChange(n); } catch (e) { /* ignore */ }
+        }
+      } catch (e) {
+        console.warn('[sync] 图片补齐失败', e.message);
+      } finally {
+        imgFilling = false;
+      }
+    }, 2500);
+  }
+
+  /* ---------------------------------------------------------- 图片上传队列 */
+  // 记录批量推完后，图片在后台慢慢传，避免一次性几百张把同步卡死。
+
+  var imgUpTimer = null;
+  var imgUping = false;
+
+  function queueImageUpload() {
+    if (!st.enabled || !st.server) return;
+    if (imgUping || imgUpTimer) return;
+    imgUpTimer = setTimeout(async function () {
+      imgUpTimer = null;
+      if (imgUping) return;
+      imgUping = true;
+      var fails = 0;
+      try {
+        var recs = await DB.allRecords();
+        for (var i = 0; i < recs.length; i++) {
+          if (!st.enabled || !st.server) break;
+          var r = recs[i];
+          var ids = (r.problemImages || []).concat(r.solutionImages || []);
+          if (!ids.length) continue;
+
+          var ok = await uploadImagesOf(r);
+          if (ok) {
+            fails = 0;
+          } else {
+            fails++;
+            if (fails >= 3) {
+              console.warn('[sync] 连续上传失败，暂停图片上传');
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[sync] 图片上传中断', e.message);
+      } finally {
+        imgUping = false;
+      }
+    }, 2000);
+  }
+
   /* ---------------------------------------------------------- 主流程 */
 
   function setStatus(status, message) {
@@ -439,6 +639,9 @@ window.VaultSync = (function () {
 
       var p = await pull({ timeout: opts.timeout || TIMEOUT_MS });
       setStatus('ok', '');
+
+      // 本地缺的图片后台慢慢补，不挡这次同步的返回
+      queueImageFill();
 
       if (p.changed && !st.silent && typeof st.onRemoteChange === 'function') {
         try { await st.onRemoteChange(p.changed); } catch (e) { /* ignore */ }
@@ -762,20 +965,17 @@ window.VaultSync = (function () {
       return { changed: 0, skipped: true };
     }
 
-    try {
-      // 首屏只等 2.5 秒：服务器没开时不能把页面卡住
-      var p = await pull({ timeout: FIRST_MS });
-      setStatus('ok', '');
-      st.silent = false;
-      return p;
-    } catch (e) {
-      st.silent = false;
+    // 首屏已经由本地缓存渲染完了，这里允许拉到数据后直接刷新界面
+    st.silent = false;
+    startPoll();
+    render();
+
+    // 后台同步，绝不阻塞首屏
+    syncNow({ quiet: true }).catch(function (e) {
       setStatus('error', e.message);
-      return { changed: 0, error: e.message };
-    } finally {
-      startPoll();
-      render();
-    }
+    });
+
+    return { changed: 0, background: true };
   }
 
   return {
