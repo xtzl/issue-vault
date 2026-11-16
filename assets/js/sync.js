@@ -56,6 +56,7 @@ window.VaultSync = (function () {
     imgQueue: new Set(),  // 待上传图片的记录 id
     imgTotal: 0,          // 本轮要传的图片张数
     imgDone: 0,           // 本轮已传张数
+    upload: { phase: 'idle', total: 0, done: 0, message: '' },
     pushTimer: null,
     pollTimer: null,
     busy: false,
@@ -380,6 +381,11 @@ window.VaultSync = (function () {
     var failed = false;
     st.imgTotal = (st.imgTotal || 0) + todo.length;
 
+    // 进入上传阶段，进度浮层亮起来
+    st.upload.phase = 'uploading';
+    st.upload.total += todo.length;
+    renderUpload();
+
     async function worker() {
       while (cursor < todo.length) {
         if (!st.enabled || !st.server || failed) return;
@@ -389,14 +395,19 @@ window.VaultSync = (function () {
           if (!im || !im.full) {
             // 本地没这张图，标记一下别再反复查
             st.imgs.add(iid);
+            st.upload.done++;
+            st.upload.total--;
+            renderUpload();
             continue;
           }
           await uploadBlob(iid, im.full, im.type);
           st.imgs.add(iid);
           st.imgDone = (st.imgDone || 0) + 1;
-          if (st.imgDone % 10 === 0) render();
+          st.upload.done++;
+          renderUpload();
         } catch (e) {
           console.warn('[sync] 图片上传失败', iid, e.message);
+          st.upload.message = e.message;
           failed = true;
           return;
         }
@@ -680,6 +691,13 @@ window.VaultSync = (function () {
       recordIds.forEach(function (i) { st.imgQueue.add(String(i)); });
     }
     if (st.imgQueue.size === 0) return;
+
+    // 有新任务进来先给个反馈，别让人等那 2 秒防抖以为没反应
+    if (!imgUping && !imgUpTimer) {
+      st.upload = { phase: 'checking', total: 0, done: 0, message: '' };
+      renderUpload();
+    }
+
     if (imgUping || imgUpTimer) return;
 
     imgUpTimer = setTimeout(async function () {
@@ -711,6 +729,20 @@ window.VaultSync = (function () {
       } finally {
         imgUping = false;
         st.imgTotal = 0;
+
+        if (st.upload.phase === 'checking' || st.upload.phase === 'uploading') {
+          if (st.upload.total === 0) {
+            st.upload.phase = 'idle';                 // 没有缺图，直接收起
+          } else if (st.upload.done >= st.upload.total) {
+            st.upload.phase = 'done';                 // 全部传完
+          } else {
+            st.upload.phase = 'error';                // 中断，保住已传的
+            st.upload.message = st.upload.message ||
+              ('还有 ' + (st.upload.total - st.upload.done) + ' 张没传完，下次同步接着补');
+          }
+        }
+
+        renderUpload();
         render();
       }
     }, 2000);
@@ -795,6 +827,11 @@ window.VaultSync = (function () {
 
     var BATCH = 40;
     var done = 0;
+
+    // 点下去立刻有反馈，别让人以为没反应
+    st.upload = { phase: 'checking', total: 0, done: 0, message: '正在推送记录（共 ' + recs.length + ' 条）…' };
+    renderUpload();
+
     for (var i = 0; i < recs.length; i += BATCH) {
       var chunk = recs.slice(i, i + BATCH);
       await api('/api/records/batch', {
@@ -804,6 +841,8 @@ window.VaultSync = (function () {
         timeout: 60000
       });
       done += chunk.length;
+      st.upload.message = '正在推送记录 ' + done + ' / ' + recs.length + '…';
+      renderUpload();
       if (typeof onProgress === 'function') onProgress(done, recs.length);
     }
     st.since = 0;
@@ -886,7 +925,24 @@ window.VaultSync = (function () {
       + '.vsync-btn:disabled{opacity:.5;cursor:not-allowed}'
       + '.vsync-msg{margin-top:8px;font-size:11px;line-height:1.5;color:var(--text-3);word-break:break-all}'
       + '.vsync-msg.err{color:var(--danger)}'
-      + '.vsync-msg.ok{color:var(--success)}';
+      + '.vsync-msg.ok{color:var(--success)}'
+      // ---- 上传进度浮层 ----
+      + '.vup{position:fixed;right:22px;bottom:86px;z-index:210;width:296px;'
+      + 'background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);'
+      + 'box-shadow:var(--shadow-lg);padding:12px 14px;font-family:var(--font);'
+      + 'transition:opacity .28s ease,transform .28s ease}'
+      + '.vup.hide{opacity:0;transform:translateY(10px);pointer-events:none}'
+      + '.vup-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}'
+      + '.vup-title{font-size:12.5px;font-weight:600;color:var(--text)}'
+      + '.vup-count{font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;flex:none}'
+      + '.vup-bar{height:5px;background:var(--surface-3);border-radius:3px;overflow:hidden}'
+      + '.vup-bar i{display:block;height:100%;width:0;background:var(--primary);border-radius:3px;transition:width .18s linear}'
+      + '.vup-sub{margin-top:8px;font-size:11.5px;line-height:1.5;color:var(--text-3)}'
+      + '.vup.done .vup-bar i{background:var(--success)}'
+      + '.vup.done .vup-title{color:var(--success)}'
+      + '.vup.err .vup-bar i{background:var(--danger)}'
+      + '.vup.err .vup-title{color:var(--danger)}'
+      + '@media (max-width:640px){.vup{left:14px;right:14px;width:auto;bottom:74px}}';
     var s = document.createElement('style');
     s.id = 'vsync-style';
     s.textContent = css;
@@ -1106,6 +1162,96 @@ window.VaultSync = (function () {
     if (st.status === 'error' && st.message) {
       setMsg(st.message, 'err');
     }
+  }
+
+  /* ---------------------------------------------------------- 上传进度浮层 */
+
+  var upEl = null;
+  var upHideTimer = null;
+
+  function ensureUploadUI() {
+    if (upEl && document.body.contains(upEl)) return upEl;
+    if (!document.getElementById('vsync-style')) injectStyle();
+
+    var box = document.createElement('div');
+    box.className = 'vup hide';
+    box.id = 'vaultUpload';
+    box.innerHTML = ''
+      + '<div class="vup-head">'
+      + '  <span class="vup-title" id="vupTitle">正在上传照片</span>'
+      + '  <span class="vup-count" id="vupCount"></span>'
+      + '</div>'
+      + '<div class="vup-bar"><i id="vupBar"></i></div>'
+      + '<div class="vup-sub" id="vupSub"></div>';
+    document.body.appendChild(box);
+
+    box._title = box.querySelector('#vupTitle');
+    box._count = box.querySelector('#vupCount');
+    box._bar = box.querySelector('#vupBar');
+    box._sub = box.querySelector('#vupSub');
+
+    upEl = box;
+    return box;
+  }
+
+  function renderUpload() {
+    var u = st.upload;
+    if (!u || u.phase === 'idle') {
+      if (upEl) upEl.classList.add('hide');
+      return;
+    }
+
+    var box = ensureUploadUI();
+    if (upHideTimer) {
+      clearTimeout(upHideTimer);
+      upHideTimer = null;
+    }
+    box.classList.remove('hide', 'done', 'err');
+
+    if (u.phase === 'checking') {
+      box._title.textContent = '正在准备…';
+      box._count.textContent = '';
+      box._bar.style.width = '0%';
+      box._sub.textContent = u.message || '对比服务器上已有的照片';
+      return;
+    }
+
+    if (u.phase === 'uploading') {
+      var pct = u.total ? Math.round((u.done / u.total) * 100) : 0;
+      box._title.textContent = '正在上传照片';
+      box._count.textContent = u.done + ' / ' + u.total;
+      box._bar.style.width = Math.max(2, pct) + '%';
+      var left = u.total - u.done;
+      box._sub.textContent = left > 0 ? ('还剩 ' + left + ' 张，页面别关') : '即将完成…';
+      return;
+    }
+
+    if (u.phase === 'done') {
+      box.classList.add('done');
+      box._title.textContent = '照片已全部上传';
+      box._count.textContent = u.done + ' / ' + u.total;
+      box._bar.style.width = '100%';
+      box._sub.textContent = '其他设备刷新就能看到';
+      upHideTimer = setTimeout(function () {
+        if (st.upload.phase === 'done') {
+          st.upload.phase = 'idle';
+          renderUpload();
+        }
+      }, 5000);
+      return;
+    }
+
+    if (u.phase === 'error') {
+      box.classList.add('err');
+      box._title.textContent = '照片上传中断';
+      box._count.textContent = u.done + ' / ' + u.total;
+      box._sub.textContent = u.message || '已传的不会丢，下次同步接着补';
+    }
+  }
+
+  function resetUpload() {
+    st.upload = { phase: 'idle', total: 0, done: 0, message: '' };
+    renderUpload();
   }
 
   /* ---------------------------------------------------------- 启动 */
