@@ -2228,7 +2228,8 @@
 
   if (el.attachInput) {
     el.attachInput.addEventListener('change', async (e) => {
-      const files = e.target.files;
+      // 必须先拷成数组：下面把 input.value 清空时，FileList 会跟着变成空的
+      const files = Array.from(e.target.files || []);
       const kind = state.attachKind === 'solution' ? 'solution' : 'problem';
       e.target.value = '';
       await addAttachments(kind, files);
