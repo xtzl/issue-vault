@@ -2681,6 +2681,29 @@
     }
   };
 
+  // 补传缺失图片：清库/误删后，从本机缓存把图传回服务器
+  $('#btnRepairImg').onclick = async () => {
+    if (!window.VaultSync || !window.VaultSync.repairMissingImages) {
+      toast('同步模块未就绪，刷新页面再试', 'err');
+      return;
+    }
+    const btn = $('#btnRepairImg');
+    btn.disabled = true;
+    try {
+      toast('正在检查服务器缺失的图片…');
+      const r = await window.VaultSync.repairMissingImages();
+      toast(r.missing === 0
+        ? '服务器图片齐全（检查 ' + r.checked + ' 张）'
+        : '缺失 ' + r.missing + ' 张 · 已补传 ' + r.uploaded +
+          ' 张' + (r.noLocal ? ' · 本机也没有 ' + r.noLocal + ' 张' : ''),
+        r.noLocal ? 'err' : 'ok');
+    } catch (e) {
+      toast('补传失败：' + (e.message || ''), 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
   // 清空
   $('#btnGc').onclick = async () => {
     try {
@@ -2693,12 +2716,14 @@
   };
 
   $('#btnWipe').onclick = async () => {
+    const connected = !!(window.VaultSync && window.VaultSync.getState().enabled);
     const ok = await confirmDialog({
       title: '清空全部数据？',
-      text: '所有记录和图片都会被永久删除，<b>无法恢复</b>。<br><br>' +
-        '<b>注意：如果这台电脑开着同步，服务器和其它电脑上的数据也会一起被清空。</b><br>' +
-        '只想清本机缓存的话，请用上面的「清理未使用图片」。<br><br>' +
-        '强烈建议先导出完整备份。',
+      text: '所有记录和图片、附件都会被永久删除，<b>无法恢复</b>。<br><br>' +
+        (connected
+          ? '<b>已连接服务器：这是全局清空，笔记本和手机上打开后会自动跟着清空。</b>'
+          : '<b>当前没连服务器：只会清空这台电脑，其它设备不受影响。</b>') +
+        '<br>强烈建议先导出完整备份。',
       okText: '确认清空'
     });
     if (!ok) return;
@@ -2708,14 +2733,28 @@
       okText: '清空'
     });
     if (!ok2) return;
-    await DB.wipeAll();
+
+    let result = null;
+    try {
+      if (connected) {
+        result = await window.VaultSync.wipeAll();
+      } else {
+        await DB.hardWipe();
+      }
+    } catch (e) {
+      toast('清空失败：' + (e.message || ''), 'err');
+      return;
+    }
+
     urlCache.clear();
     await reload();
     state.categories = await DB.getCategories();
     await updateStorage();
     renderLibrary();
     renderSettings();
-    toast('已清空全部数据');
+    toast(result && result.serverWiped
+      ? '已清空服务器和本机，其它设备同步后会自动清空'
+      : '已清空本机数据');
   };
 
   // 导入

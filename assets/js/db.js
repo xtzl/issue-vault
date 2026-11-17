@@ -651,7 +651,9 @@ window.VaultDB = (function () {
     pendingFileSize, gcPendingFiles,
     bumpUseCount, toggleStar,
     getMeta, setMeta, getCategories, setCategories,
-    usage, exportBackup, importBackup, mergeFromBackup, wipeAll, objectURL,
+    usage, exportBackup, importBackup, mergeFromBackup, wipeAll,
+    hardWipe: wipeAll, // 不被 sync.js 包装的原始清空，用于「服务器世代变化」时重置本地
+    objectURL,
     DEFAULT_CATEGORIES
   };
 })();

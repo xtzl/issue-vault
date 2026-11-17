@@ -33,7 +33,8 @@ window.VaultSync = (function () {
     server: 'vault-sync-server',
     since: 'vault-sync-since',
     pending: 'vault-sync-pending',
-    imgs: 'vault-sync-imgs'
+    imgs: 'vault-sync-imgs',
+    epoch: 'vault-sync-epoch'   // 服务器世代；变了说明服务器被清空/重置
   };
 
   var POLL_MS = 15000;     // 增量拉取间隔
@@ -46,6 +47,7 @@ window.VaultSync = (function () {
     enabled: false,
     server: '',
     since: 0,
+    epoch: 0,             // 上次同步看到的服务器世代
     status: 'off',        // off | idle | syncing | ok | error
     message: '',
     lastPullAt: 0,
@@ -168,6 +170,7 @@ window.VaultSync = (function () {
     }
 
     st.since = Number(lsGet(K.since) || 0) || 0;
+    st.epoch = Number(lsGet(K.epoch) || 0) || 0;
 
     try {
       var p = JSON.parse(lsGet(K.pending) || 'null');
@@ -334,6 +337,36 @@ window.VaultSync = (function () {
 
   /* ---------------------------------------------------------- 拉取 */
 
+  /**
+   * 服务器清空后，本地必须彻底归零 —— 不能靠墓碑，因为清库时墓碑也一起没了。
+   * 用 hardWipe（没被包装的那个）清库，避免清空动作又被推回服务器。
+   */
+  async function resetLocalForEpoch(newEpoch) {
+    console.warn('[sync] 服务器世代 ' + st.epoch + ' -> ' + newEpoch + '，本地全量重置');
+    try {
+      await DB.hardWipe();
+    } catch (e) {
+      console.warn('[sync] 重置本地失败', e.message);
+    }
+
+    st.pending.clear();
+    st.pendingDel.clear();
+    st.imgs.clear();
+    st.pfiles.clear();
+    if (st.imgQueue) st.imgQueue.clear();
+    st.since = 0;
+    st.epoch = newEpoch;
+
+    lsSet(K.since, '0');
+    lsSet(K.pending, '');
+    lsSet(K.imgs, '');
+    lsSet(K.epoch, String(newEpoch));
+
+    if (st.onRemoteChange) {
+      try { await st.onRemoteChange(); } catch (e) { /* 界面刷新失败不影响数据 */ }
+    }
+  }
+
   async function pull(opts) {
     opts = opts || {};
     if (!st.enabled || !st.server) return { changed: 0, skipped: true };
@@ -342,6 +375,19 @@ window.VaultSync = (function () {
     var resp = await api('/api/sync?since=' + since, {
       timeout: opts.timeout || TIMEOUT_MS
     });
+
+    // ---- 世代检查：服务器被清空/重置时，增量同步什么也不会返回，
+    //      必须靠 epoch 发现，然后清本地 + 全量重拉 ----
+    var remoteEpoch = Number(resp && resp.epoch) || 0;
+    if (remoteEpoch && st.epoch && remoteEpoch !== st.epoch) {
+      await resetLocalForEpoch(remoteEpoch);
+      // 本地已归零，按 since=0 重新拉一遍，拿回清空后的现状（通常是空的）
+      return await pull({ full: true, timeout: opts.timeout || TIMEOUT_MS });
+    }
+    if (remoteEpoch) {
+      st.epoch = remoteEpoch;
+      lsSet(K.epoch, String(remoteEpoch));
+    }
 
     var list = (resp && Array.isArray(resp.records)) ? resp.records : [];
     var changed = await applyRemote(list);
@@ -502,6 +548,62 @@ window.VaultSync = (function () {
     return done;
   }
 
+  /**
+   * 补齐服务器上缺失的图片：遍历所有记录引用的图片，问服务端哪些没有，
+   * 本地 IndexedDB 有二进制就补传上去。
+   * 用于清库后恢复、或服务器图片目录被误删后的重建。
+   * @returns {Promise<{checked:number, missing:number, uploaded:number, noLocal:number}>}
+   */
+  async function repairMissingImages() {
+    if (!st.enabled || !st.server) throw new Error('还没连上服务器');
+    var recs = await DB.allRecords();
+    var ids = [];
+    (recs || []).forEach(function (r) {
+      (r.problemImages || []).concat(r.solutionImages || []).forEach(function (i) {
+        if (i && ids.indexOf(i) < 0) ids.push(i);
+      });
+    });
+    var result = { checked: ids.length, missing: 0, uploaded: 0, noLocal: 0 };
+    if (!ids.length) return result;
+
+    // 分批问，避免 URL 过长
+    var have = new Set();
+    for (var i = 0; i < ids.length; i += 200) {
+      var chunk = ids.slice(i, i + 200);
+      try {
+        var r = await api('/api/images/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: chunk })
+        });
+        ((r && r.have) || []).forEach(function (x) { have.add(x); });
+      } catch (e) {
+        console.warn('[sync] 图片检查失败', e.message);
+      }
+    }
+
+    var missing = ids.filter(function (x) { return !have.has(x); });
+    result.missing = missing.length;
+    for (var j = 0; j < missing.length; j++) {
+      var iid = missing[j];
+      var im = await DB.getImage(iid);
+      if (!im || !im.full) {
+        result.noLocal++;
+        continue;
+      }
+      try {
+        await uploadBlob(iid, im.full, im.type || 'image/jpeg');
+        st.imgs.add(iid);
+        result.uploaded++;
+      } catch (e) {
+        result.noLocal++;
+        console.warn('[sync] 补图失败', iid, e.message);
+      }
+    }
+    persistImgs();
+    return result;
+  }
+
   /** 还有多少附件没传上去（给设置页显示） */
   async function pendingFileStats() {
     try {
@@ -622,6 +724,53 @@ window.VaultSync = (function () {
 
   async function pushDelete(id) {
     await api('/api/records/' + encodeURIComponent(id), { method: 'DELETE' });
+  }
+
+  /**
+   * 权威清空：连着服务器就走 /api/wipe，
+   * 服务器清库 + epoch+1，其它所有端下次同步自动跟着清空。
+   * 连不上时只清本机（这时不会推墓碑，见下面说明）。
+   */
+  async function authoritativeWipe() {
+    var sent = false;
+    if (st.enabled && st.server) {
+      try {
+        var r = await api('/api/wipe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: 'WIPE_ALL' }),
+          timeout: 15000
+        });
+        st.epoch = Number(r.epoch) || st.epoch;
+        lsSet(K.epoch, String(st.epoch));
+        sent = true;
+      } catch (e) {
+        console.warn('[sync] 服务器清库失败，改为只清本机', e.message);
+      }
+    }
+
+    if (!sent) {
+      // 没连上服务器：只清本机。注意不推墓碑 —— 本地都没了，推墓碑
+      // 只会在服务器凭空造出一堆删除标记，没有意义。
+      await DB.hardWipe();
+    }
+
+    st.pending.clear();
+    st.pendingDel.clear();
+    st.imgs.clear();
+    st.pfiles.clear();
+    if (st.imgQueue) st.imgQueue.clear();
+    st.since = 0;
+    lsSet(K.since, '0');
+    lsSet(K.pending, '');
+    lsSet(K.imgs, '');
+    lsSet(K.epoch, String(st.epoch));
+
+    try {
+      await DB.gcPendingFiles();
+    } catch (e) { /* ignore */ }
+
+    return { serverWiped: sent, epoch: st.epoch };
   }
 
   /** 把待推送队列清空。失败即停，保留队列等下次重试。 */
@@ -961,15 +1110,38 @@ window.VaultSync = (function () {
 
     try {
       var pushed = 0;
+
+      // 先探一次世代：服务器刚清过库就别再推本地数据回去了，
+      // 否则本地待推队列会把清掉的记录又写回服务器。
+      var justReset = false;
       try {
-        var f = await flush();
-        pushed = f.pushed || 0;
+        var h = await api('/api/health', { timeout: opts.timeout || TIMEOUT_MS });
+        var hEpoch = Number(h && h.epoch) || 0;
+        if (hEpoch && st.epoch && hEpoch !== st.epoch) {
+          await resetLocalForEpoch(hEpoch);
+          justReset = true;
+        } else if (hEpoch) {
+          st.epoch = hEpoch;
+          lsSet(K.epoch, String(hEpoch));
+        }
       } catch (e) {
-        // 推送失败仍要继续拉，免得连对方的新数据也看不到
-        console.warn('[sync] 推送失败', e.message);
+        console.warn('[sync] 世代探测失败，继续常规同步', e.message);
       }
 
-      var p = await pull({ timeout: opts.timeout || TIMEOUT_MS });
+      if (!justReset) {
+        try {
+          var f = await flush();
+          pushed = f.pushed || 0;
+        } catch (e) {
+          // 推送失败仍要继续拉，免得连对方的新数据也看不到
+          console.warn('[sync] 推送失败', e.message);
+        }
+      }
+
+      var p = await pull({
+        full: justReset,
+        timeout: opts.timeout || TIMEOUT_MS
+      });
       setStatus('ok', '');
 
       // 本地缺的图片后台慢慢补，不挡这次同步的返回
@@ -1248,7 +1420,9 @@ window.VaultSync = (function () {
         st.enabled = true;
         lsSet(K.enabled, '1');
         st.since = 0;
+        st.epoch = 0; // 换服务器 = 换了一套数据，世代记录作废
         lsSet(K.since, '0');
+        lsSet(K.epoch, '0');
         setStatus('idle', '');
         syncNow({}).then(function (r) {
           setMsg('已连接，拉取 ' + (r.changed || 0) + ' 条', 'ok');
@@ -1565,7 +1739,9 @@ window.VaultSync = (function () {
     render: render,
     uploadFile: uploadFile,
     fileUrl: fileUrl,
+    wipeAll: authoritativeWipe,
     flushPendingFiles: flushPendingFiles,
+    repairMissingImages: repairMissingImages,
     pendingFileStats: pendingFileStats,
     isPendingFile: isPendingFile,
     loadPendingIndex: loadPendingIndex,
@@ -1574,6 +1750,7 @@ window.VaultSync = (function () {
         enabled: st.enabled,
         server: st.server,
         since: st.since,
+        epoch: st.epoch,
         status: st.status,
         message: st.message,
         lastPullAt: st.lastPullAt,
