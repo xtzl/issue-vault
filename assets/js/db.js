@@ -250,10 +250,15 @@ window.VaultDB = (function () {
     const rec = await getRecord(id);
     if (!rec) return;
     const db = await open();
-    const tx = db.transaction([STORE_REC, STORE_IMG], 'readwrite');
+    const tx = db.transaction([STORE_REC, STORE_IMG, STORE_PFILE], 'readwrite');
     tx.objectStore(STORE_REC).delete(id);
     const imgStore = tx.objectStore(STORE_IMG);
     (rec.problemImages || []).concat(rec.solutionImages || []).forEach((iid) => imgStore.delete(iid));
+    // 还没传上去的附件也一起清掉，否则会永远留在本地等传
+    const pfileStore = tx.objectStore(STORE_PFILE);
+    (rec.problemFiles || []).concat(rec.solutionFiles || []).forEach((f) => {
+      if (f && f.id) pfileStore.delete(f.id);
+    });
     await txDone(tx);
   }
 
