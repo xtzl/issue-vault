@@ -393,15 +393,20 @@ window.VaultDB = (function () {
   /* ---------- 存储用量 ---------- */
   async function usage() {
     const db = await open();
-    const tx = db.transaction([STORE_IMG, STORE_REC], 'readonly');
-    // 两个请求必须同时发出：await 会让空闲事务自动提交
+    const tx = db.transaction([STORE_IMG, STORE_REC, STORE_PFILE], 'readonly');
+    // 三个请求必须同时发出：await 会让空闲事务自动提交
     const pImgs = req(tx.objectStore(STORE_IMG).getAll());
     const pRecs = req(tx.objectStore(STORE_REC).getAll());
+    const pFiles = req(tx.objectStore(STORE_PFILE).getAll());
     const imgs = await pImgs;
     const recs = await pRecs;
+    const pfiles = await pFiles;
     let bytes = 0;
     (imgs || []).forEach((i) => { bytes += (i.size || 0) + (i.thumbSize || 0); });
     (recs || []).forEach((r) => { bytes += JSON.stringify(r).length * 2; });
+    let pendingBytes = 0;
+    (pfiles || []).forEach((f) => { pendingBytes += (f.size || 0); });
+    bytes += pendingBytes;
     let quota = 0;
     try {
       if (navigator.storage && navigator.storage.estimate) {
@@ -413,7 +418,9 @@ window.VaultDB = (function () {
       bytes,
       quota,
       imageCount: (imgs || []).length,
-      recordCount: (recs || []).length
+      recordCount: (recs || []).length,
+      pendingFileCount: (pfiles || []).length,
+      pendingFileBytes: pendingBytes
     };
   }
 

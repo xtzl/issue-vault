@@ -1316,7 +1316,11 @@
       el.storageBar.parentElement.title = fmtBytes(u.bytes) + ' · ' + u.recordCount + ' 条记录 · ' + u.imageCount + ' 张图片';
       const detail = $('#storageDetail');
       if (detail) {
-        detail.textContent = '已用 ' + fmtBytes(u.bytes) + ' · ' + u.recordCount + ' 条记录 · ' + u.imageCount + ' 张图片';
+        let txt = '已用 ' + fmtBytes(u.bytes) + ' · ' + u.recordCount + ' 条记录 · ' + u.imageCount + ' 张图片';
+        if (u.pendingFileCount) {
+          txt += ' · ' + u.pendingFileCount + ' 个附件待上传（' + fmtBytes(u.pendingFileBytes) + '）';
+        }
+        detail.textContent = txt;
       }
     } catch (e) {
       el.storageText.textContent = '—';
