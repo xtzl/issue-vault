@@ -21,6 +21,7 @@
     editorTags: [],
     editorImages: { problem: [], solution: [] },
     editorNewImages: new Set(),
+    editorFiles: { problem: [], solution: [] },
     lastUploader: 'problem',
     flashId: null,
     drawerId: null,
@@ -83,6 +84,9 @@
     upSolution: $('#upSolution'),
     upProblemGrid: $('#upProblemGrid'),
     upSolutionGrid: $('#upSolutionGrid'),
+    attProblemList: $('#attProblemList'),
+    attSolutionList: $('#attSolutionList'),
+    attachInput: $('#attachInput'),
 
     drawer: $('#drawer'),
     drawerMask: $('#drawerMask'),
@@ -690,6 +694,7 @@
     state.editorTags = [];
     state.editorImages = { problem: [], solution: [] };
     state.editorNewImages = new Set();
+    state.editorFiles = { problem: [], solution: [] };
     state.editingId = null;
     el.editorTitle.textContent = '登记新问题';
     el.editorSub.textContent = '问题现象、当时的回复、相关截图，都记在这里';
@@ -697,6 +702,8 @@
     renderEditorTags();
     renderUploadGrid('problem');
     renderUploadGrid('solution');
+    renderAttachList('problem');
+    renderAttachList('solution');
     renderCustomerList();
   }
 
@@ -727,12 +734,18 @@
         problem: (rec.problemImages || []).slice(),
         solution: (rec.solutionImages || []).slice()
       };
+      state.editorFiles = {
+        problem: (rec.problemFiles || []).slice(),
+        solution: (rec.solutionFiles || []).slice()
+      };
       state.editorNewImages = new Set();
       el.editorTitle.textContent = '编辑记录';
       el.editorSub.textContent = '修改后会覆盖原内容，保存即生效';
       renderEditorTags();
       renderUploadGrid('problem');
       renderUploadGrid('solution');
+      renderAttachList('problem');
+      renderAttachList('solution');
       renderCustomerList();
     }
     setView('editor');
@@ -785,6 +798,100 @@
     renderUploadGrid(kind);
   }
 
+  /* ---------------- 通用附件 ---------------- */
+
+  const FILE_BADGES = [
+    { test: /\.pdf$/i, label: 'PDF', color: '#DC2626' },
+    { test: /\.(docx?|wps)$/i, label: 'DOC', color: '#2563EB' },
+    { test: /\.(xlsx?|csv|et)$/i, label: 'XLS', color: '#059669' },
+    { test: /\.(pptx?|dps)$/i, label: 'PPT', color: '#EA580C' },
+    { test: /\.(zip|rar|7z|tar|gz)$/i, label: 'ZIP', color: '#7C3AED' },
+    { test: /\.(png|jpe?g|gif|webp|bmp|heic)$/i, label: 'IMG', color: '#0891B2' },
+    { test: /\.(mp4|mov|avi|mkv)$/i, label: 'VID', color: '#DB2777' },
+    { test: /\.(mp3|wav|m4a|aac)$/i, label: 'AUD', color: '#0D9488' },
+    { test: /\.(txt|md|log)$/i, label: 'TXT', color: '#6B7280' },
+  ];
+
+  function fileBadge(name) {
+    const n = name || '';
+    for (const b of FILE_BADGES) if (b.test.test(n)) return b;
+    return { label: 'FILE', color: '#9CA3AF' };
+  }
+
+  function attIsPending(f) {
+    if (!f) return false;
+    if (f.pending) return true;
+    return !!(window.VaultSync && window.VaultSync.isPendingFile && window.VaultSync.isPendingFile(f.id));
+  }
+
+  function renderAttachList(kind) {
+    const box = kind === 'problem' ? el.attProblemList : el.attSolutionList;
+    if (!box) return;
+    const items = state.editorFiles[kind] || [];
+    box.innerHTML = items.map((f) => {
+      const b = fileBadge(f.name);
+      const pend = attIsPending(f);
+      return '<div class="attach-item' + (pend ? ' pending' : '') + '">' +
+        '<span class="attach-ico" style="background:' + b.color + '">' + b.label + '</span>' +
+        '<span class="attach-name" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>' +
+        (pend ? '<span class="attach-pend">待上传</span>' : '') +
+        '<span class="attach-size">' + fmtBytes(f.size || 0) + '</span>' +
+        '<button type="button" class="attach-del" data-delatt="' + escapeHtml(f.id) +
+        '" data-kind="' + kind + '" title="移除">×</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  async function addAttachments(kind, files) {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    if (!window.VaultSync || !window.VaultSync.uploadFile) {
+      toast('同步模块还没加载好，刷新页面再试', 'err');
+      return;
+    }
+
+    const MAX = 100 * 1024 * 1024;
+    let ok = 0;
+    let skip = 0;
+    let queued = 0;
+
+    for (const f of list) {
+      if (f.size > MAX) {
+        toast('「' + f.name + '」超过 100MB，先压缩一下', 'err');
+        skip++;
+        continue;
+      }
+      try {
+        toast('正在处理 ' + f.name + '…');
+        const meta = await window.VaultSync.uploadFile(f);
+        // 只存必要字段，pending 由同步层状态判断，不写进记录
+        state.editorFiles[kind].push({
+          id: meta.id, name: meta.name, size: meta.size, type: meta.type
+        });
+        if (meta.pending) queued++;
+        ok++;
+        renderAttachList(kind);
+      } catch (e) {
+        console.error(e);
+        toast('「' + f.name + '」添加失败：' + (e.message || ''), 'err');
+        skip++;
+      }
+    }
+
+    if (ok) {
+      const extra = skippedMsg(skip);
+      if (queued) {
+        toast('已存本地 ' + queued + ' 个附件，回公司连上服务器后自动上传' + extra, 'ok');
+      } else {
+        toast('已上传 ' + ok + ' 个附件' + extra, 'ok');
+      }
+    }
+  }
+
+  function skippedMsg(n) {
+    return n ? '，跳过 ' + n + ' 个' : '';
+  }
+
   function collectForm() {
     const tags = (state.editorTags || []).slice();
     return {
@@ -806,6 +913,8 @@
       star: el.fStar.checked,
       problemImages: state.editorImages.problem.slice(),
       solutionImages: state.editorImages.solution.slice(),
+      problemFiles: (state.editorFiles.problem || []).slice(),
+      solutionFiles: (state.editorFiles.solution || []).slice(),
       source: 'manual'
     };
   }
@@ -938,6 +1047,33 @@
         '</div>';
     };
 
+    // 通用附件：点一下直接下载，图片能在新标签页预览
+    const fileList = (files) => {
+      if (!files || !files.length) return '';
+      return '<div class="dw-files">' +
+        files.map((f) => {
+          const b = fileBadge(f.name);
+          const ico = '<span class="attach-ico" style="background:' + b.color + '">' + b.label + '</span>';
+          const nm = '<span class="attach-name" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+          const sz = '<span class="attach-size">' + fmtBytes(f.size || 0) + '</span>';
+
+          // 离线添加、还没传上去的附件：不给假链接，明确告诉用户
+          if (attIsPending(f)) {
+            return '<span class="attach-item pending" title="还没上传到服务器，回公司连上局域网后自动上传">' +
+              ico + nm + '<span class="attach-pend">待上传</span>' + sz + '</span>';
+          }
+
+          const href = (window.VaultSync && window.VaultSync.fileUrl)
+            ? window.VaultSync.fileUrl(f.id, f.name, false)
+            : '#';
+          return '<a class="attach-item" href="' + escapeHtml(href) +
+            '" target="_blank" rel="noopener" download="' + escapeHtml(f.name) + '">' +
+            ico + nm + sz +
+            '</a>';
+        }).join('') +
+        '</div>';
+    };
+
     const normHTML = (t) => linkify(highlight(t, tokens));
 
     el.drawerInner.innerHTML = '' +
@@ -971,12 +1107,14 @@
           '<div class="dw-text' + (r.problem ? '' : ' empty-text') + '">' +
             (r.problem ? normHTML(r.problem) : '没有填写问题描述') + '</div>' +
           imgGrid(pImgs, 'problem') +
+          fileList(r.problemFiles) +
         '</div>' +
         '<div class="dw-section">' +
           '<div class="dw-section-head"><span class="dot dot-solution"></span><span class="dw-section-title is-solution">解决方法</span></div>' +
           '<div class="dw-solution"><div class="dw-text' + (r.solution ? '' : ' empty-text') + '">' +
             (r.solution ? normHTML(r.solution) : '还没有记录解决方法') + '</div></div>' +
           imgGrid(sImgs, 'solution') +
+          fileList(r.solutionFiles) +
         '</div>' +
         (r.note ? '<div class="dw-section">' +
           '<div class="dw-section-head"><span class="dw-section-title">备注</span></div>' +
@@ -2075,6 +2213,47 @@
     });
   });
 
+  /* 通用附件：选文件 -> 逐个上传 -> 进 state.editorFiles */
+  $$('[data-attach]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.attachKind = btn.dataset.attach === 'solution' ? 'solution' : 'problem';
+      if (!el.attachInput) {
+        toast('页面缺少附件控件，刷新一下试试', 'err');
+        return;
+      }
+      el.attachInput.value = '';
+      el.attachInput.click();
+    });
+  });
+
+  if (el.attachInput) {
+    el.attachInput.addEventListener('change', async (e) => {
+      const files = e.target.files;
+      const kind = state.attachKind === 'solution' ? 'solution' : 'problem';
+      e.target.value = '';
+      await addAttachments(kind, files);
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-delatt]');
+    if (!del) return;
+    e.preventDefault();
+    const id = del.dataset.delatt;
+    const kind = del.dataset.kind === 'solution' ? 'solution' : 'problem';
+    const gone = (state.editorFiles[kind] || []).find((f) => f.id === id);
+    state.editorFiles[kind] = (state.editorFiles[kind] || []).filter((f) => f.id !== id);
+    renderAttachList(kind);
+    // 还没传上去的直接把本地暂存删掉，别白占空间
+    if (gone && attIsPending(gone)) {
+      DB.deletePendingFile(id).then(() => {
+        if (window.VaultSync && window.VaultSync.loadPendingIndex) {
+          window.VaultSync.loadPendingIndex();
+        }
+      }).catch(() => {});
+    }
+  });
+
   ['upProblem', 'upSolution'].forEach((id) => {
     const box = document.getElementById(id);
     const kind = id === 'upSolution' ? 'solution' : 'problem';
@@ -2680,6 +2859,17 @@
             updateStorage();
           } catch (e) {
             console.warn('[sync] 刷新界面失败', e);
+          }
+        };
+        window.VaultSync.onFilesUploaded = function (n) {
+          toast(n + ' 个附件已上传到服务器', 'ok');
+          // 抽屉正开着就重画一次，「待上传」会变成可下载的链接
+          if (state.drawerId && el.drawer.classList.contains('open')) {
+            openDrawer(state.drawerId);
+          }
+          if (state.editingId) {
+            renderAttachList('problem');
+            renderAttachList('solution');
           }
         };
         window.VaultSync.bootstrap().catch(function (e) {

@@ -53,6 +53,7 @@ window.VaultSync = (function () {
     pending: new Set(),   // 待推送的记录 id
     pendingDel: new Set(),// 待推送的删除 id
     imgs: new Set(),      // 已上传的图片 id
+    pfiles: new Set(),    // 还没传上去的附件 id（本地暂存中）
     imgQueue: new Set(),  // 待上传图片的记录 id
     imgTotal: 0,          // 本轮要传的图片张数
     imgDone: 0,           // 本轮已传张数
@@ -376,6 +377,154 @@ window.VaultSync = (function () {
     });
   }
 
+  /** 真正把二进制发到服务端；失败由调用方决定是入队还是报错 */
+  async function postFile(id, blob, name, mime) {
+    var url = st.server + '/api/files/' + encodeURIComponent(id) +
+      '?name=' + encodeURIComponent(name || 'file');
+
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 180000);
+    var init = {
+      method: 'POST',
+      headers: { 'Content-Type': mime || 'application/octet-stream' },
+      body: blob
+    };
+    if (ctrl) init.signal = ctrl.signal;
+
+    try {
+      var res = await fetch(url, init);
+      if (!res.ok) throw new Error('上传失败（HTTP ' + res.status + '）');
+      await res.json().catch(function () { /* 响应体不重要 */ });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 上传一个通用附件（PDF/Word/Excel/压缩包/图片原图…）。
+   * 二进制直传，不进 IndexedDB。
+   *
+   * 关键：笔记本带出去时连不上服务器，这时不报错，
+   * 而是把文件暂存在本地 pendingFiles，回到局域网后由 flushPendingFiles 自动补传。
+   * @returns {Promise<{id:string,name:string,size:number,type:string,pending?:boolean}>}
+   */
+  async function uploadFile(file) {
+    if (!file) throw new Error('没有选中文件');
+
+    var id = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : 'f-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    var name = file.name || '未命名文件';
+
+    var meta = { id: id, name: name, size: file.size || 0, type: file.type || '' };
+
+    // 1. 能连上就先直传，最省事，也不占本地空间
+    if (st.enabled && st.server) {
+      try {
+        await postFile(id, file, name, file.type);
+        return meta;
+      } catch (e) {
+        console.warn('[sync] 附件直传失败，转本地暂存', e.message);
+      }
+    }
+
+    // 2. 连不上（或传失败）→ 存本地，标记 pending，等下次同步补传
+    await DB.putPendingFile({
+      id: id,
+      name: name,
+      size: file.size || 0,
+      type: file.type || '',
+      blob: file
+    });
+    st.pfiles.add(id);
+    meta.pending = true;
+    return meta;
+  }
+
+  /** 从本地暂存里恢复「待上传」索引（刷新页面后角标还在） */
+  async function loadPendingIndex() {
+    try {
+      var list = await DB.listPendingFiles();
+      st.pfiles = new Set((list || []).map(function (f) { return f.id; }));
+    } catch (e) {
+      st.pfiles = new Set();
+    }
+    return st.pfiles;
+  }
+
+  /** 这个附件现在还在本地等着传 —— 给界面渲染用，同步调用 */
+  function isPendingFile(id) {
+    return !!(id && st.pfiles && st.pfiles.has(String(id)));
+  }
+
+  /**
+   * 把本地暂存的附件补传到服务器，成功一个删一个。
+   * @returns {Promise<number>} 成功条数
+   */
+  async function flushPendingFiles() {
+    if (!st.enabled || !st.server) return 0;
+    var list;
+    try {
+      list = await DB.listPendingFiles();
+    } catch (e) {
+      return 0;
+    }
+    if (!list || !list.length) return 0;
+
+    var done = 0;
+    var failed = 0;
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (!it || !it.blob) {
+        // 没有二进制（异常残留），直接清掉，避免死循环
+        await DB.deletePendingFile(it.id).catch(function () {});
+        st.pfiles.delete(it.id);
+        continue;
+      }
+      try {
+        // 先问服务端有没有，避免重复传
+        await postFile(it.id, it.blob, it.name, it.type);
+        await DB.deletePendingFile(it.id);
+        st.pfiles.delete(it.id);
+        done++;
+      } catch (e) {
+        failed++;
+        console.warn('[sync] 附件补传失败', it.name, e.message);
+        if (failed >= 3) break; // 网络不通就停，别硬撑
+      }
+    }
+    if (done) {
+      console.log('[sync] 补传附件 ' + done + ' 个');
+      if (st.onFilesUploaded) {
+        try { st.onFilesUploaded(done); } catch (e) { /* 界面回调失败不影响同步 */ }
+      }
+    }
+    return done;
+  }
+
+  /** 还有多少附件没传上去（给设置页显示） */
+  async function pendingFileStats() {
+    try {
+      var list = await DB.listPendingFiles();
+      return {
+        count: list.length,
+        bytes: list.reduce(function (n, f) { return n + (f.size || 0); }, 0)
+      };
+    } catch (e) {
+      return { count: 0, bytes: 0 };
+    }
+  }
+
+  /** 附件的访问地址：inline=1 时不强制下载（图片能直接显示） */
+  function fileUrl(id, name, inline) {
+    if (!st.server || !id) return '';
+    var u = st.server + '/api/files/' + encodeURIComponent(id);
+    var q = [];
+    if (name) q.push('name=' + encodeURIComponent(name));
+    if (inline) q.push('inline=1');
+    return q.length ? u + '?' + q.join('&') : u;
+  }
+
   /**
    * 把一条记录引用的图片传到服务端。
    * 关键：先问服务端 /api/images/check 哪些已经有了，只传缺的。
@@ -478,6 +627,14 @@ window.VaultSync = (function () {
   /** 把待推送队列清空。失败即停，保留队列等下次重试。 */
   async function flush() {
     if (!st.enabled || !st.server) return { ok: false, skipped: true };
+
+    // 先把离线期间暂存的附件补上去，再推记录（否则记录里引用的文件在服务端不存在）
+    try {
+      await flushPendingFiles();
+    } catch (e) {
+      console.warn('[sync] 附件补传出错', e.message);
+    }
+
     if (!st.pending.size && !st.pendingDel.size) return { ok: true, pushed: 0 };
 
     var pushed = 0;
@@ -1378,6 +1535,7 @@ window.VaultSync = (function () {
     loadConfig();
     hookDB();
     mountUI();
+    await loadPendingIndex().catch(function () { /* 老库没这个 store 也无所谓 */ });
 
     if (!st.enabled || !st.server) {
       render();
@@ -1405,6 +1563,12 @@ window.VaultSync = (function () {
     pull: pull,
     flush: flush,
     render: render,
+    uploadFile: uploadFile,
+    fileUrl: fileUrl,
+    flushPendingFiles: flushPendingFiles,
+    pendingFileStats: pendingFileStats,
+    isPendingFile: isPendingFile,
+    loadPendingIndex: loadPendingIndex,
     getState: function () {
       return {
         enabled: st.enabled,
@@ -1418,6 +1582,8 @@ window.VaultSync = (function () {
       };
     },
     set onRemoteChange(fn) { st.onRemoteChange = fn; },
-    get onRemoteChange() { return st.onRemoteChange; }
+    get onRemoteChange() { return st.onRemoteChange; },
+    set onFilesUploaded(fn) { st.onFilesUploaded = fn; },
+    get onFilesUploaded() { return st.onFilesUploaded; }
   };
 })();

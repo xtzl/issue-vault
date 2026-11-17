@@ -303,6 +303,15 @@
                     <span class="upload-tip">可拖入图片，或直接 Ctrl+V 粘贴截图</span>
                   </div>
                 </div>
+                <div class="attach-box">
+                  <div class="attach-list" id="attProblemList"></div>
+                  <div class="attach-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-attach="problem">
+                      <svg width="15" height="15"><use href="#i-link"/></svg>添加附件
+                    </button>
+                    <span class="upload-tip">PDF、Word、Excel、压缩包、视频都行，单个最大 100MB</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -320,6 +329,15 @@
                       <svg width="15" height="15"><use href="#i-image"/></svg>添加图片
                     </button>
                     <span class="upload-tip">截图、后台操作界面都可以放这里</span>
+                  </div>
+                </div>
+                <div class="attach-box">
+                  <div class="attach-list" id="attSolutionList"></div>
+                  <div class="attach-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-attach="solution">
+                      <svg width="15" height="15"><use href="#i-link"/></svg>添加附件
+                    </button>
+                    <span class="upload-tip">发给客户的话术文档、操作手册等</span>
                   </div>
                 </div>
               </div>
@@ -489,6 +507,7 @@
                 <svg width="16" height="16"><use href="#i-download"/></svg>导出 CSV 表格
               </button>
               <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+              <input type="file" id="attachInput" multiple hidden>
             </div>
 
             <div class="hint-box">

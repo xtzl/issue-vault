@@ -6,10 +6,11 @@ window.VaultDB = (function () {
   'use strict';
 
   const DB_NAME = 'issue-vault';
-  const DB_VER = 1;
+  const DB_VER = 2;
   const STORE_REC = 'records';
   const STORE_IMG = 'images';
   const STORE_META = 'meta';
+  const STORE_PFILE = 'pendingFiles'; // 还没传上服务器的附件（笔记本带出去时用）
 
   const DEFAULT_CATEGORIES = [
     '充值退款', '会员卡券', '设备故障', '系统操作',
@@ -61,6 +62,10 @@ window.VaultDB = (function () {
         }
         if (!db.objectStoreNames.contains(STORE_META)) {
           db.createObjectStore(STORE_META, { keyPath: 'key' });
+        }
+        // v2：离线添加的附件先存这里，连上服务器后自动上传并删除
+        if (!db.objectStoreNames.contains(STORE_PFILE)) {
+          db.createObjectStore(STORE_PFILE, { keyPath: 'id' });
         }
       };
       r.onsuccess = () => {
@@ -226,6 +231,9 @@ window.VaultDB = (function () {
     rec.tags = Array.isArray(rec.tags) ? rec.tags.filter(Boolean) : [];
     rec.problemImages = Array.isArray(rec.problemImages) ? rec.problemImages : [];
     rec.solutionImages = Array.isArray(rec.solutionImages) ? rec.solutionImages : [];
+    // 通用附件：{ id, name, size, type }，二进制存在服务端 data/files
+    rec.problemFiles = Array.isArray(rec.problemFiles) ? rec.problemFiles : [];
+    rec.solutionFiles = Array.isArray(rec.solutionFiles) ? rec.solutionFiles : [];
     rec.star = !!rec.star;
     rec.useCount = Number(rec.useCount) || 0;
     rec.occurredAt = rec.occurredAt || new Date().toISOString().slice(0, 10);
@@ -281,6 +289,54 @@ window.VaultDB = (function () {
     const store = tx.objectStore(STORE_IMG);
     orphans.forEach((k) => store.delete(k));
     await txDone(tx);
+    return orphans.length;
+  }
+
+  /* ---------- 待上传附件（离线暂存） ---------- */
+  // { id, name, size, type, blob, at }
+  async function putPendingFile(item) {
+    const db = await open();
+    const tx = db.transaction(STORE_PFILE, 'readwrite');
+    tx.objectStore(STORE_PFILE).put(Object.assign({ at: Date.now() }, item));
+    await txDone(tx);
+  }
+
+  async function getPendingFile(id) {
+    const db = await open();
+    const tx = db.transaction(STORE_PFILE, 'readonly');
+    return req(tx.objectStore(STORE_PFILE).get(id));
+  }
+
+  async function deletePendingFile(id) {
+    const db = await open();
+    const tx = db.transaction(STORE_PFILE, 'readwrite');
+    tx.objectStore(STORE_PFILE).delete(id);
+    await txDone(tx);
+  }
+
+  async function listPendingFiles() {
+    const db = await open();
+    const tx = db.transaction(STORE_PFILE, 'readonly');
+    const list = (await req(tx.objectStore(STORE_PFILE).getAll())) || [];
+    return list.sort((a, b) => (a.at || 0) - (b.at || 0));
+  }
+
+  async function pendingFileSize() {
+    const list = await listPendingFiles();
+    return list.reduce((n, f) => n + (f.size || 0), 0);
+  }
+
+  /** 清掉没有任何记录引用的待上传附件（用户删记录后残留） */
+  async function gcPendingFiles() {
+    const recs = await allRecords();
+    const used = new Set();
+    recs.forEach((r) => {
+      (r.problemFiles || []).forEach((f) => f && used.add(f.id));
+      (r.solutionFiles || []).forEach((f) => f && used.add(f.id));
+    });
+    const list = await listPendingFiles();
+    const orphans = list.filter((f) => !used.has(f.id)).map((f) => f.id);
+    for (const id of orphans) await deletePendingFile(id);
     return orphans.length;
   }
 
@@ -491,10 +547,11 @@ window.VaultDB = (function () {
 
   async function wipeAll() {
     const db = await open();
-    const tx = db.transaction([STORE_REC, STORE_IMG, STORE_META], 'readwrite');
+    const tx = db.transaction([STORE_REC, STORE_IMG, STORE_META, STORE_PFILE], 'readwrite');
     tx.objectStore(STORE_REC).clear();
     tx.objectStore(STORE_IMG).clear();
     tx.objectStore(STORE_META).clear();
+    tx.objectStore(STORE_PFILE).clear();
     await txDone(tx);
   }
 
@@ -578,6 +635,8 @@ window.VaultDB = (function () {
     open, uid,
     addImage, getImage, deleteImage, getThumbs,
     allRecords, getRecord, saveRecord, deleteRecord, pruneImages, gcImages,
+    putPendingFile, getPendingFile, deletePendingFile, listPendingFiles,
+    pendingFileSize, gcPendingFiles,
     bumpUseCount, toggleStar,
     getMeta, setMeta, getCategories, setCategories,
     usage, exportBackup, importBackup, mergeFromBackup, wipeAll, objectURL,
