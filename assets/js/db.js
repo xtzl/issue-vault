@@ -235,6 +235,7 @@ window.VaultDB = (function () {
     rec.problemFiles = Array.isArray(rec.problemFiles) ? rec.problemFiles : [];
     rec.solutionFiles = Array.isArray(rec.solutionFiles) ? rec.solutionFiles : [];
     rec.star = !!rec.star;
+    rec.pinned = !!rec.pinned;
     rec.useCount = Number(rec.useCount) || 0;
     rec.occurredAt = rec.occurredAt || new Date().toISOString().slice(0, 10);
     rec.source = rec.source || 'manual';
@@ -365,6 +366,19 @@ window.VaultDB = (function () {
     tx.objectStore(STORE_REC).put(rec);
     await txDone(tx);
     return rec.star;
+  }
+
+  /** 置顶：置顶的记录永远排在最前面，和 star 互不干扰 */
+  async function togglePin(id) {
+    const rec = await getRecord(id);
+    if (!rec) return null;
+    rec.pinned = !rec.pinned;
+    rec.updatedAt = Date.now();
+    const db = await open();
+    const tx = db.transaction(STORE_REC, 'readwrite');
+    tx.objectStore(STORE_REC).put(rec);
+    await txDone(tx);
+    return rec.pinned;
   }
 
   /* ---------- meta ---------- */
@@ -649,7 +663,7 @@ window.VaultDB = (function () {
     allRecords, getRecord, saveRecord, deleteRecord, pruneImages, gcImages,
     putPendingFile, getPendingFile, deletePendingFile, listPendingFiles,
     pendingFileSize, gcPendingFiles,
-    bumpUseCount, toggleStar,
+    bumpUseCount, toggleStar, togglePin,
     getMeta, setMeta, getCategories, setCategories,
     usage, exportBackup, importBackup, mergeFromBackup, wipeAll,
     hardWipe: wipeAll, // 不被 sync.js 包装的原始清空，用于「服务器世代变化」时重置本地

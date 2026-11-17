@@ -1239,7 +1239,7 @@ window.VaultSync = (function () {
       return r;
     };
 
-    ['toggleStar', 'bumpUseCount'].forEach(function (fn) {
+    ['toggleStar', 'togglePin', 'bumpUseCount'].forEach(function (fn) {
       var orig = DB[fn];
       if (typeof orig !== 'function') return;
       DB[fn] = async function (id) {

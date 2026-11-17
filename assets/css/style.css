@@ -268,6 +268,14 @@ input,select,textarea{font-family:inherit}
 .record-card:hover .rc-star{opacity:.85}
 .rc-star:hover{opacity:1}
 .rc-star.on{opacity:1}
+.rc-pin{
+  border:none;background:none;padding:0;color:var(--primary);cursor:pointer;
+  display:grid;place-items:center;flex:none;opacity:.22;transition:opacity .15s,transform .15s;
+}
+.record-card:hover .rc-pin{opacity:.9}
+.rc-pin:hover{opacity:1;transform:translateY(-1px)}
+.rc-pin.on{opacity:1}
+.record-card.is-pinned{border-left:3px solid var(--primary)}
 .rc-title{
   margin:0;font-size:15px;font-weight:600;color:var(--text);line-height:1.45;
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;

@@ -403,24 +403,30 @@
 
     const sort = state.sort;
 
+    // 置顶记录永远排最前，不受排序方式影响
+    const pinFirst = (arr) => {
+      arr.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+      return arr;
+    };
+
     if (sort === 'occurred') {
       list.sort((a, b) => {
         const d1 = a.occurredAt || '', d2 = b.occurredAt || '';
         if (d1 !== d2) return d2.localeCompare(d1);
         return (b.updatedAt || 0) - (a.updatedAt || 0);
       });
-      return list;
+      return pinFirst(list);
     }
     if (sort === 'used') {
       list.sort((a, b) => {
         const c = (b.useCount || 0) - (a.useCount || 0);
         return c || (b.updatedAt || 0) - (a.updatedAt || 0);
       });
-      return list;
+      return pinFirst(list);
     }
     if (sort === 'title') {
       list.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'));
-      return list;
+      return pinFirst(list);
     }
 
     // 默认：「最近更新」。搜索时改为相关度优先，命中更准
@@ -437,7 +443,7 @@
       // 星标置顶
       list.sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0));
     }
-    return list;
+    return pinFirst(list);
   }
 
   function renderFilterCats() {
@@ -492,9 +498,12 @@
     const solText = r.solution ? snippet(r.solution, tokens, 90) : '';
 
     return '' +
-      '<article class="record-card" data-id="' + escapeHtml(r.id) + '" tabindex="0">' +
+      '<article class="record-card' + (r.pinned ? ' is-pinned' : '') + '" data-id="' + escapeHtml(r.id) + '" tabindex="0">' +
         '<div class="rc-main">' +
           '<div class="rc-top">' +
+            '<button class="rc-pin' + (r.pinned ? ' on' : '') + '" data-pin="' + escapeHtml(r.id) + '" title="' + (r.pinned ? '取消置顶' : '置顶') + '">' +
+              '<svg width="15" height="15"><use href="#i-' + (r.pinned ? 'pin-fill' : 'pin') + '"/></svg>' +
+            '</button>' +
             '<button class="rc-star' + (r.star ? ' on' : '') + '" data-star="' + escapeHtml(r.id) + '" title="标为重点">' +
               '<svg width="15" height="15"><use href="#i-' + (r.star ? 'star-fill' : 'star') + '"/></svg>' +
             '</button>' +
@@ -1089,6 +1098,9 @@
           r.tags.map((t) => '<span class="tag-pill">#' + escapeHtml(t) + '</span>').join('') + '</div>' : '') +
       '</div>' +
       '<div class="dw-actions">' +
+        '<button class="btn btn-ghost btn-sm" data-pin="' + escapeHtml(r.id) + '">' +
+          '<svg width="15" height="15"><use href="#i-' + (r.pinned ? 'pin-fill' : 'pin') + '"/></svg>' +
+          (r.pinned ? '取消置顶' : '置顶') + '</button>' +
         (r.solution ? '<button class="btn btn-primary btn-sm" data-copy-sol="' + escapeHtml(r.id) + '">' +
           '<svg width="15" height="15"><use href="#i-copy"/></svg>复制解决方法</button>' : '') +
         '<button class="btn btn-ghost btn-sm" data-copy-all="' + escapeHtml(r.id) + '">' +
@@ -2129,6 +2141,18 @@
 
   // 列表交互
   el.recordList.addEventListener('click', (e) => {
+    const pinBtn = e.target.closest('[data-pin]');
+    if (pinBtn) {
+      e.stopPropagation();
+      const id = pinBtn.dataset.pin;
+      DB.togglePin(id).then((v) => {
+        const rec = state.records.find((r) => r.id === id);
+        if (rec) rec.pinned = v;
+        renderLibrary();
+        toast(v ? '已置顶，会一直排在最前面' : '已取消置顶');
+      });
+      return;
+    }
     const starBtn = e.target.closest('[data-star]');
     if (starBtn) {
       e.stopPropagation();
@@ -2340,6 +2364,19 @@
     const t = e.target;
 
     if (t.closest('[data-close-drawer]')) { closeDrawer(); return; }
+
+    const pinBtn = t.closest('[data-pin]');
+    if (pinBtn) {
+      const id = pinBtn.dataset.pin;
+      DB.togglePin(id).then((v) => {
+        const rec = state.records.find((r) => r.id === id);
+        if (rec) rec.pinned = v;
+        renderLibrary();
+        openDrawer(id); // 重画抽屉里的按钮文案
+        toast(v ? '已置顶，会一直排在最前面' : '已取消置顶');
+      });
+      return;
+    }
 
     const img = t.closest('[data-full]');
     if (img) {
