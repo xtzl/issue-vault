@@ -207,7 +207,9 @@ window.VaultSync = (function () {
 
   function api(pathname, opts) {
     opts = opts || {};
-    if (!st.server) return Promise.reject(new Error('未配置同步服务器'));
+    // 允许临时指定 base（自动探测备选服务器时用），默认用当前配置
+    var base = opts.base || st.server;
+    if (!base) return Promise.reject(new Error('未配置同步服务器'));
 
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeout = opts.timeout || TIMEOUT_MS;
@@ -223,7 +225,7 @@ window.VaultSync = (function () {
     if (opts.body) init.body = opts.body;
     if (ctrl) init.signal = ctrl.signal;
 
-    return fetch(st.server + pathname, init).then(function (res) {
+    return fetch(base + pathname, init).then(function (res) {
       return res.text().then(function (text) {
         var data = null;
         try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
@@ -1421,14 +1423,35 @@ window.VaultSync = (function () {
         lsSet(K.enabled, '1');
         st.since = 0;
         st.epoch = 0; // 换服务器 = 换了一套数据，世代记录作废
+        // 图片上传记录是「按服务器」算的：换一台服务器后必须清空，
+        // 否则会以为图片已经传过、不再上传，新服务器就收不到图。
+        st.imgs.clear();
+        persistImgs();
         lsSet(K.since, '0');
         lsSet(K.epoch, '0');
         setStatus('idle', '');
-        syncNow({}).then(function (r) {
-          setMsg('已连接，拉取 ' + (r.changed || 0) + ' 条', 'ok');
-        }).catch(function (e) {
-          setMsg(e.message, 'err');
-        });
+        // 新服务器上可能一条都没有，先把本机记录和图片整体推过去，
+        // 再走常规同步（拉取对方已有的）。这样换服务器不会"只同步了个空壳"。
+        (async function () {
+          try {
+            var all = await DB.allRecords();
+            var live = (all || []).filter(function (r) { return r && r.id && !r.deleted; });
+            if (live.length) await pushAll();
+          } catch (e) {
+            console.warn('[sync] 换服务器后全量推送失败', e.message);
+          }
+          try {
+            await repairMissingImages();
+          } catch (e) {
+            console.warn('[sync] 换服务器后补图失败', e.message);
+          }
+          try {
+            var r2 = await syncNow({});
+            setMsg('已连接，拉取 ' + (r2.changed || 0) + ' 条', 'ok');
+          } catch (e) {
+            setMsg(e.message, 'err');
+          }
+        })();
       } else {
         st.enabled = false;
         lsSet(K.enabled, '0');
@@ -1702,11 +1725,46 @@ window.VaultSync = (function () {
 
   var booted = false;
 
+  /**
+   * 笔记本场景的自动纠偏：
+   * 页面里注入了 VAULT_SYNC_SERVER（比如 location.origin）时，如果上次存的
+   * 地址是公司台式机、而此刻根本连不上（带出去了），就自动切回注入的地址。
+   * 否则会出现「页面能开、但数据一直不进来/图片传不上去」的假同步。
+   */
+  async function autoFallbackServer() {
+    var forced = trimSlash(String(window.VAULT_SYNC_SERVER || ''));
+    if (!forced || forced === st.server) return false;
+    try {
+      await api('/api/health', { timeout: 2500, base: st.server });
+      return false; // 上次的地址还通着，不用切
+    } catch (e) {
+      // 上次的地址连不上，试注入的
+    }
+    try {
+      await api('/api/health', { timeout: 2500, base: forced });
+    } catch (e) {
+      return false; // 两个都不通，保持原样，等网络恢复
+    }
+    st.server = forced;
+    lsSet(K.server, forced);
+    st.since = 0;
+    st.epoch = 0;
+    st.enabled = true;
+    lsSet(K.enabled, '1');
+    st.imgs.clear();
+    persistImgs();
+    lsSet(K.since, '0');
+    lsSet(K.epoch, '0');
+    console.warn('[sync] 原地址连不上，已自动切到 ' + forced);
+    return true;
+  }
+
   async function bootstrap() {
     if (booted) return { changed: 0 };
     booted = true;
 
     loadConfig();
+    var autoSwitched = await autoFallbackServer();
     hookDB();
     mountUI();
     await loadPendingIndex().catch(function () { /* 老库没这个 store 也无所谓 */ });
@@ -1721,6 +1779,31 @@ window.VaultSync = (function () {
     startPoll();
     render();
     updateVersionBadge();
+
+    // 刚自动切到本机节点（新服务器是空的）：先把本机数据整体推过去，
+    // 否则手机上永远拉不到东西，看着像"同步不了"。
+    if (autoSwitched) {
+      (async function () {
+        try {
+          var all = await DB.allRecords();
+          var live = (all || []).filter(function (r) { return r && r.id && !r.deleted; });
+          if (live.length) await pushAll();
+        } catch (e) {
+          console.warn('[sync] 自动切换后推送失败', e.message);
+        }
+        try {
+          await repairMissingImages();
+        } catch (e) {
+          console.warn('[sync] 自动切换后补图失败', e.message);
+        }
+        try {
+          await syncNow({ quiet: true });
+        } catch (e) {
+          setStatus('error', e.message);
+        }
+      })();
+      return { changed: 0, background: true };
+    }
 
     // 后台同步，绝不阻塞首屏
     syncNow({ quiet: true }).catch(function (e) {
