@@ -342,16 +342,41 @@ window.VaultSync = (function () {
   /**
    * 服务器清空后，本地必须彻底归零 —— 不能靠墓碑，因为清库时墓碑也一起没了。
    * 用 hardWipe（没被包装的那个）清库，避免清空动作又被推回服务器。
+   *
+   * 但清空后用户可能又记了新东西：这些记录的 updatedAt 比上次水位线新，
+   * 必须保留并推回服务器，不能连新数据一起抹掉。
    */
   async function resetLocalForEpoch(newEpoch) {
     console.warn('[sync] 服务器世代 ' + st.epoch + ' -> ' + newEpoch + '，本地全量重置');
+    var keepNewer = [];
+    try {
+      var all = await DB.allRecords();
+      keepNewer = (all || []).filter(function (r) {
+        if (!r || !r.id) return false;
+        // 明确待推送的，或者比上次水位线新的，都算「服务器还没见过」
+        return st.pending.has(r.id) || (r.updatedAt || 0) > st.since;
+      });
+    } catch (e) {
+      keepNewer = [];
+    }
+
     try {
       await DB.hardWipe();
     } catch (e) {
       console.warn('[sync] 重置本地失败', e.message);
     }
 
-    st.pending.clear();
+    // 清库之后新记的那几条放回去，并标成待推送
+    var kept = 0;
+    for (var i = 0; i < keepNewer.length; i++) {
+      try {
+        await DB.saveRecord(keepNewer[i]);
+        st.pending.add(keepNewer[i].id);
+        kept++;
+      } catch (e) { /* 单条失败忽略 */ }
+    }
+    if (kept) console.warn('[sync] 保留清库后新增的 ' + kept + ' 条本地记录');
+
     st.pendingDel.clear();
     st.imgs.clear();
     st.pfiles.clear();
@@ -360,9 +385,10 @@ window.VaultSync = (function () {
     st.epoch = newEpoch;
 
     lsSet(K.since, '0');
-    lsSet(K.pending, '');
     lsSet(K.imgs, '');
     lsSet(K.epoch, String(newEpoch));
+    persistPending();
+    persistImgs();
 
     if (st.onRemoteChange) {
       try { await st.onRemoteChange(); } catch (e) { /* 界面刷新失败不影响数据 */ }
@@ -392,11 +418,32 @@ window.VaultSync = (function () {
     }
 
     var list = (resp && Array.isArray(resp.records)) ? resp.records : [];
+
+    // ---- 兜底：服务器上的有效记录明显多于本地时，说明水位线跳过头了
+    //      （典型：服务器数据是从备份恢复的，记录时间比水位线还旧）。
+    //      这时增量永远拉不到，必须强制全量重拉一次。----
+    if (!opts.full) {
+      var liveTotal = Number(resp && resp.liveTotal) || 0;
+      var localCount = 0;
+      try {
+        var allLocal = await DB.allRecords();
+        localCount = (allLocal || []).filter(function (r) { return r && !r.deleted; }).length;
+      } catch (e) { /* 数不出来就跳过这个判断 */ }
+      if (liveTotal > localCount + 2) {
+        console.warn('[sync] 服务器 ' + liveTotal + ' 条 > 本地 ' + localCount +
+          ' 条，水位线可能跳过头，改为全量拉取');
+        return await pull({ full: true, timeout: opts.timeout || TIMEOUT_MS });
+      }
+    }
+
     var changed = await applyRemote(list);
 
-    // 水位线：以服务器时间为准，回退一点防漏（重复拉取是幂等的）
-    var serverTime = (resp && resp.serverTime) || Date.now();
-    st.since = Math.max(0, serverTime - SAFETY_GAP);
+    // 水位线：用「服务器上记录的最大 updatedAt」而不是服务器当前时间。
+    // 用当前时间的话，只要记录的时间比现在旧，增量同步就永远拉不到它们。
+    var maxUpdatedAt = Number(resp && resp.maxUpdatedAt) || 0;
+    var serverTime = Number(resp && resp.serverTime) || Date.now();
+    var base = maxUpdatedAt > 0 ? maxUpdatedAt : serverTime;
+    st.since = Math.max(0, base - SAFETY_GAP);
     lsSet(K.since, String(st.since));
 
     st.lastPullAt = Date.now();
