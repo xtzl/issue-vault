@@ -346,15 +346,19 @@ window.VaultSync = (function () {
    * 但清空后用户可能又记了新东西：这些记录的 updatedAt 比上次水位线新，
    * 必须保留并推回服务器，不能连新数据一起抹掉。
    */
-  async function resetLocalForEpoch(newEpoch) {
+  async function resetLocalForEpoch(newEpoch, epochAt) {
     console.warn('[sync] 服务器世代 ' + st.epoch + ' -> ' + newEpoch + '，本地全量重置');
+    var cutoff = Number(epochAt) || 0;
     var keepNewer = [];
     try {
       var all = await DB.allRecords();
       keepNewer = (all || []).filter(function (r) {
         if (!r || !r.id) return false;
-        // 明确待推送的，或者比上次水位线新的，都算「服务器还没见过」
-        return st.pending.has(r.id) || (r.updatedAt || 0) > st.since;
+        // 只有「服务器清空那一刻之后」记的才算新数据；
+        // 更早的一律清掉，否则笔记本上的旧记录会被当成新数据带回来。
+        if (cutoff > 0) return (r.updatedAt || 0) > cutoff;
+        // 拿不到清空时刻就保守处理：只留明确待推送的
+        return st.pending.has(r.id);
       });
     } catch (e) {
       keepNewer = [];
@@ -408,7 +412,7 @@ window.VaultSync = (function () {
     //      必须靠 epoch 发现，然后清本地 + 全量重拉 ----
     var remoteEpoch = Number(resp && resp.epoch) || 0;
     if (remoteEpoch && st.epoch && remoteEpoch !== st.epoch) {
-      await resetLocalForEpoch(remoteEpoch);
+      await resetLocalForEpoch(remoteEpoch, Number(resp && resp.epochAt) || 0);
       // 本地已归零，按 since=0 重新拉一遍，拿回清空后的现状（通常是空的）
       return await pull({ full: true, timeout: opts.timeout || TIMEOUT_MS });
     }
@@ -1167,7 +1171,7 @@ window.VaultSync = (function () {
         var h = await api('/api/health', { timeout: opts.timeout || TIMEOUT_MS });
         var hEpoch = Number(h && h.epoch) || 0;
         if (hEpoch && st.epoch && hEpoch !== st.epoch) {
-          await resetLocalForEpoch(hEpoch);
+          await resetLocalForEpoch(hEpoch, Number(h && h.epochAt) || 0);
           justReset = true;
         } else if (hEpoch) {
           st.epoch = hEpoch;
@@ -1795,13 +1799,14 @@ window.VaultSync = (function () {
     st.server = forced;
     lsSet(K.server, forced);
     st.since = 0;
-    st.epoch = 0;
+    // 注意：这里**不清 epoch**。让它保留上一次的值，
+    // 这样紧接着的 pull 能发现「服务器换了/被清空」，走 resetLocalForEpoch，
+    // 而不是把本地旧数据一股脑推上去（那会把已删除的记录又带回来）。
     st.enabled = true;
     lsSet(K.enabled, '1');
     st.imgs.clear();
     persistImgs();
     lsSet(K.since, '0');
-    lsSet(K.epoch, '0');
     console.warn('[sync] 原地址连不上，已自动切到 ' + forced);
     return true;
   }
@@ -1827,26 +1832,21 @@ window.VaultSync = (function () {
     render();
     updateVersionBadge();
 
-    // 刚自动切到本机节点（新服务器是空的）：先把本机数据整体推过去，
-    // 否则手机上永远拉不到东西，看着像"同步不了"。
+    // 刚自动切到本机节点：先同步一次，让 pull 去判断世代。
+    // 绝不能先 pushAll —— 新节点可能是空的，把本地旧数据推上去就等于
+    // 把用户已经删掉的记录又搬回来了。
     if (autoSwitched) {
       (async function () {
-        try {
-          var all = await DB.allRecords();
-          var live = (all || []).filter(function (r) { return r && r.id && !r.deleted; });
-          if (live.length) await pushAll();
-        } catch (e) {
-          console.warn('[sync] 自动切换后推送失败', e.message);
-        }
-        try {
-          await repairMissingImages();
-        } catch (e) {
-          console.warn('[sync] 自动切换后补图失败', e.message);
-        }
         try {
           await syncNow({ quiet: true });
         } catch (e) {
           setStatus('error', e.message);
+        }
+        // 同步完之后，本地还剩的（清空后新记的 / 待推送的）再补图
+        try {
+          await repairMissingImages();
+        } catch (e) {
+          console.warn('[sync] 自动切换后补图失败', e.message);
         }
       })();
       return { changed: 0, background: true };
